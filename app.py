@@ -79,8 +79,17 @@ with st.spinner("🔄 Carregando dados do mercado..."):
 # ── cabeçalho ─────────────────────────────────────────────────────────────
 st.title("⚽ Cartola Analyzer — Dashboard")
 
-rodada_atual = status_raw.get("rodada", {}).get("rodada_atual", "?") if status_raw else "?"
-status_mercado = status_raw.get("status_mercado", {}).get("nome", "?") if status_raw else "?"
+rodada_atual = status_raw.get("rodada_atual", "?") if isinstance(status_raw, dict) else "?"
+
+STATUS_MERCADO_NOME = {
+    1: "Aberto",
+    2: "Fechado",
+    3: "Em atualização",
+    4: "Final de temporada",
+}
+
+status_mercado_id = status_raw.get("status_mercado") if isinstance(status_raw, dict) else None
+status_mercado = STATUS_MERCADO_NOME.get(status_mercado_id, str(status_mercado_id or "?"))
 
 if df_all.empty:
     st.error("⚠️ Não foi possível carregar os dados. Verifique sua conexão.")
