@@ -23,8 +23,8 @@ def build_partidas_df(rodadas: list[int]) -> pd.DataFrame:
     clubes_raw = get_clubes() or {}
 
     clubes = {
-        int(k): v.get("nome", v.get("abreviacao", str(k)))
-        for k, v in clubes_raw.items()
+       int(k): v.get("nome", v.get("abreviacao", str(k)))
+       for k, v in clubes_raw.items()
     }
 
     rows = []
