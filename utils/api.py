@@ -100,3 +100,32 @@ STATUS_MAP = {
     6: "🤕 Lesionado",
     7: "🚫 Nulo",
 }
+
+STATUS_MERCADO_NOME = {
+    1: "Aberto",
+    2: "Fechado",
+    3: "Em atualização",
+    4: "Final de temporada",
+}
+
+@st.cache_data(ttl=3600)
+def get_clubes_mapa_nome() -> dict[int, str]:
+    """
+    Retorna um mapa {clube_id: nome do clube}.
+    """
+    clubes = get_clubes() or {}
+    return {
+        int(k): v.get("nome", str(k))
+        for k, v in clubes.items()
+    }
+
+@st.cache_data(ttl=3600)
+def get_clubes_mapa_curto() -> dict[int, str]:
+    """
+    Retorna um mapa {clube_id: nome curto/abreviação do clube}.
+    """
+    clubes = get_clubes() or {}
+    return {
+        int(k): v.get("nome_curto", v.get("abreviacao", str(k)))
+        for k, v in clubes.items()
+    }
