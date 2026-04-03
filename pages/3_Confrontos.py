@@ -14,7 +14,7 @@ st.set_page_config(page_title="Confrontos | Cartola Analyzer", page_icon="⚔️
 st.title("⚔️ Análise de Confrontos")
 
 status_raw = get_mercado_status() or {}
-rodada_atual = status_raw.get("rodada", {}).get("rodada_atual", 10)
+rodada_atual = status_raw.get("rodada_atual", 10) if isinstance(status_raw, dict) else 10
 
 with st.sidebar:
     st.header("⚙️ Configurações")
