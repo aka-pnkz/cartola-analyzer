@@ -130,9 +130,10 @@ with col_a:
 with col_b:
     st.subheader("📈 Média por Posição — Top 5 Atletas")
     top5_pos = (
-        df_all.groupby("posicao")
-              .apply(lambda x: x.nlargest(5, "media"))
-              .reset_index(drop=True)
+    df_all.sort_values(["posicao", "media"], ascending=[True, False])
+          .groupby("posicao", group_keys=False)
+          .head(5)
+          .reset_index(drop=True)
     )
     fig_bar = px.bar(
         top5_pos, x="nome", y="media", color="posicao", barmode="group",
