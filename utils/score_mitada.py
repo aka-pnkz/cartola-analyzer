@@ -128,24 +128,31 @@ def top_por_posicao(df: pd.DataFrame, posicao: str, top_n: int = 10) -> pd.DataF
 
 
 def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "4-3-3") -> pd.DataFrame:
+    """
+    Sugere escalação dentro de um orçamento respeitando a formação.
+    Inclui 11 jogadores + 1 técnico.
+    Formações suportadas: '4-3-3', '4-4-2', '3-5-2', '3-4-3'.
+    """
     formacoes = {
         "4-3-3": {"Goleiro": 1, "Lateral": 2, "Zagueiro": 2, "Meia": 3, "Atacante": 3},
         "4-4-2": {"Goleiro": 1, "Lateral": 2, "Zagueiro": 2, "Meia": 4, "Atacante": 2},
         "3-5-2": {"Goleiro": 1, "Lateral": 1, "Zagueiro": 2, "Meia": 5, "Atacante": 2},
         "3-4-3": {"Goleiro": 1, "Lateral": 1, "Zagueiro": 2, "Meia": 4, "Atacante": 3},
     }
+
     slots = formacoes.get(formacao, formacoes["4-3-3"])
 
     selecionados = []
     gasto = 0.0
     df_sorted = df.sort_values("sam", ascending=False)
 
+    # 11 jogadores
     for posicao, qtd in slots.items():
         candidatos = df_sorted[
             (df_sorted["posicao"] == posicao) &
             (df_sorted["status_id"] == 2) &
             (~df_sorted["id"].isin([a["id"] for a in selecionados]))
-        ].head(qtd * 5)
+        ].head(qtd * 10)
 
         for _, row in candidatos.iterrows():
             if len([a for a in selecionados if a["posicao"] == posicao]) >= qtd:
@@ -154,7 +161,22 @@ def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "
                 selecionados.append(row.to_dict())
                 gasto += row["preco"]
 
+    # 1 técnico
+    tecnicos = df_sorted[
+        (df_sorted["posicao"] == "Técnico") &
+        (df_sorted["status_id"] == 2) &
+        (~df_sorted["id"].isin([a["id"] for a in selecionados]))
+    ].head(10)
+
+    for _, row in tecnicos.iterrows():
+        if gasto + row["preco"] <= orcamento:
+            selecionados.append(row.to_dict())
+            gasto += row["preco"]
+            break
+
     result = pd.DataFrame(selecionados)
+
     if not result.empty:
         result["gasto_acumulado"] = result["preco"].cumsum()
+
     return result
