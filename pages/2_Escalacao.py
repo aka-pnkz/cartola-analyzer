@@ -26,7 +26,14 @@ if df.empty:
 # ── filtros ─────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("⚙️ Configurações")
-    orcamento = st.slider("💰 Orçamento (C$)", 50.0, 200.0, 120.0, step=1.0)
+    orcamento = st.number_input(
+        "💰 Orçamento (C$)",
+        min_value=50.0,
+        max_value=200.0,
+        value=120.0,
+        step=1.0,
+        format="%.1f",
+    )
     formacao = st.selectbox("🔢 Formação", ["4-3-3", "4-4-2", "3-5-2", "3-4-3"])
     apenas_provaveis = st.toggle("✅ Apenas atletas prováveis", value=True)
     posicao_filtro = st.multiselect(
