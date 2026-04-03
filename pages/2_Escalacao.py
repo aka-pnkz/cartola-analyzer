@@ -28,8 +28,7 @@ with st.sidebar:
     st.header("⚙️ Configurações")
     orcamento = st.number_input(
         "💰 Orçamento (C$)",
-        min_value=50.0,
-        max_value=200.0,
+        min_value=1.0,
         value=120.0,
         step=1.0,
         format="%.1f",
