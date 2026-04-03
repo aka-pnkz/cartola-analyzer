@@ -28,10 +28,11 @@ with st.sidebar:
     st.header("⚙️ Configurações")
     orcamento = st.number_input(
         "💰 Orçamento (C$)",
-        min_value=1.0,
-        value=120.0,
-        step=1.0,
-        format="%.1f",
+        min_value=50.0,
+        max_value=200.0,
+        value=122.28,
+        step=0.01,
+        format="%.2f",
     )
     formacao = st.selectbox("🔢 Formação", ["4-3-3", "4-4-2", "3-5-2", "3-4-3"])
     apenas_provaveis = st.toggle("✅ Apenas atletas prováveis", value=True)
