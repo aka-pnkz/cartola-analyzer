@@ -59,7 +59,9 @@ else:
     m1, m2, m3 = st.columns(3)
     m1.metric("💸 Gasto Total", f"C$ {total_gasto:.1f}", f"{orcamento - total_gasto:.1f} restante")
     m2.metric("📈 Soma das Médias", f"{total_media:.1f} pts")
-    m3.metric("👥 Atletas", len(escalacao))
+    qtd_jogadores = len(escalacao[escalacao["posicao"] != "Técnico"]) if not escalacao.empty else 0
+    qtd_tecnicos = len(escalacao[escalacao["posicao"] == "Técnico"]) if not escalacao.empty else 0
+    m3.metric("👥 Escalação", f"{qtd_jogadores} jogadores + {qtd_tecnicos} técnico")
 
     cols_show = ["nome", "clube", "posicao", "status", "preco", "media", "sam_pct"]
     cols_show = [c for c in cols_show if c in escalacao.columns]
