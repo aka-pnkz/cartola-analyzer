@@ -6,7 +6,7 @@ casa/fora e tendência recente.
 import pandas as pd
 import numpy as np
 from typing import Optional
-from utils.api import get_atletas_mercado, POSICAO_MAP, STATUS_MAP
+from utils.api import get_atletas_mercado, POSICAO_MAP, STATUS_MAP, get_clubes_mapa_nome
 
 
 # ── constantes de pesos ───────────────────────────────────────────────────────
@@ -31,8 +31,11 @@ def build_atletas_df() -> pd.DataFrame:
         return pd.DataFrame()
 
     atletas = data.get("atletas", [])
-    clubes_raw = data.get("clubes", {})
-    clubes = {int(k): v.get("nome_curto", str(k)) for k, v in clubes_raw.items()}
+    clubes = get_clubes_mapa_nome()
+
+    if not clubes:
+        clubes_raw = data.get("clubes", {})
+    clubes = {int(k): v.get("nome_curto", v.get("abreviacao", str(k))) for k, v in clubes_raw.items()}
 
     rows = []
     for a in atletas:
@@ -49,7 +52,7 @@ def build_atletas_df() -> pd.DataFrame:
             "id": a.get("atleta_id"),
             "nome": a.get("apelido", "?"),
             "clube_id": a.get("clube_id"),
-            "clube": clubes.get(a.get("clube_id"), "?"),
+            "clube": clubes.get(a.get("clube_id"), str(a.get("clube_id"))),
             "posicao_id": a.get("posicao_id"),
             "posicao": POSICAO_MAP.get(a.get("posicao_id"), "?"),
             "status_id": a.get("status_id"),
