@@ -10,7 +10,7 @@ from utils.api import (
     get_atletas_mercado,
     POSICAO_MAP,
     STATUS_MAP,
-    get_clubes_mapa_curto,
+    get_clubes_mapa_nome,
 )
 
 W_MEDIA        = 0.30
@@ -36,7 +36,7 @@ def build_atletas_df() -> pd.DataFrame:
     atletas = data.get("atletas", [])
 
     # tenta primeiro buscar nomes via endpoint /clubes
-    clubes = get_clubes_mapa_curto()
+    clubes = get_clubes_mapa_nome()
 
     # fallback: usa o dicionário de clubes que já vem no /atletas/mercado
     if not clubes:
