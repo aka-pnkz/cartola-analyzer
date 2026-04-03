@@ -6,10 +6,13 @@ casa/fora e tendência recente.
 import pandas as pd
 import numpy as np
 from typing import Optional
-from utils.api import get_atletas_mercado, POSICAO_MAP, STATUS_MAP, get_clubes_mapa_nome
+from utils.api import (
+    get_atletas_mercado,
+    POSICAO_MAP,
+    STATUS_MAP,
+    get_clubes_mapa_curto,
+)
 
-
-# ── constantes de pesos ───────────────────────────────────────────────────────
 W_MEDIA        = 0.30
 W_CONSISTENCIA = 0.20
 W_CUSTO        = 0.20
@@ -31,28 +34,36 @@ def build_atletas_df() -> pd.DataFrame:
         return pd.DataFrame()
 
     atletas = data.get("atletas", [])
-    clubes = get_clubes_mapa_nome()
 
+    # tenta primeiro buscar nomes via endpoint /clubes
+    clubes = get_clubes_mapa_curto()
+
+    # fallback: usa o dicionário de clubes que já vem no /atletas/mercado
     if not clubes:
         clubes_raw = data.get("clubes", {})
-    clubes = {int(k): v.get("nome_curto", v.get("abreviacao", str(k))) for k, v in clubes_raw.items()}
+        clubes = {
+            int(k): v.get("nome_curto", v.get("abreviacao", str(k)))
+            for k, v in clubes_raw.items()
+        }
 
     rows = []
     for a in atletas:
         scouts = a.get("scout", {})
-        gols             = scouts.get("G", 0) or 0
-        assistencias     = scouts.get("A", 0) or 0
+        gols = scouts.get("G", 0) or 0
+        assistencias = scouts.get("A", 0) or 0
         faltas_cometidas = scouts.get("FC", 0) or 0
-        cartao_amarelo   = scouts.get("CA", 0) or 0
-        cartao_vermelho  = scouts.get("CV", 0) or 0
+        cartao_amarelo = scouts.get("CA", 0) or 0
+        cartao_vermelho = scouts.get("CV", 0) or 0
         defesas_dificeis = scouts.get("DD", 0) or 0
-        finalizacoes     = scouts.get("FT", 0) or 0
+        finalizacoes = scouts.get("FT", 0) or 0
+
+        clube_id = a.get("clube_id")
 
         rows.append({
             "id": a.get("atleta_id"),
             "nome": a.get("apelido", "?"),
-            "clube_id": a.get("clube_id"),
-            "clube": clubes.get(a.get("clube_id"), str(a.get("clube_id"))),
+            "clube_id": clube_id,
+            "clube": clubes.get(clube_id, str(clube_id)),
             "posicao_id": a.get("posicao_id"),
             "posicao": POSICAO_MAP.get(a.get("posicao_id"), "?"),
             "status_id": a.get("status_id"),
@@ -95,8 +106,8 @@ def calcular_sam(df: pd.DataFrame) -> pd.DataFrame:
         df[f"{col}_norm"] = df.groupby("posicao_id")[col].transform(_minmax)
 
     df["consistencia_norm"] = _minmax(-df["variacao"].abs())
-    df["tendencia_norm"]    = _minmax(df["variacao"])
-    df["casa_fora_norm"]    = _minmax(df["variacao"])
+    df["tendencia_norm"] = _minmax(df["variacao"])
+    df["casa_fora_norm"] = _minmax(df["variacao"])
 
     df["sam"] = (
         W_MEDIA        * df["media_norm"] +
@@ -113,15 +124,10 @@ def calcular_sam(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def top_por_posicao(df: pd.DataFrame, posicao: str, top_n: int = 10) -> pd.DataFrame:
-    """Retorna os top N atletas de uma posição pelo SAM."""
     return df[df["posicao"] == posicao].head(top_n)
 
 
 def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "4-3-3") -> pd.DataFrame:
-    """
-    Sugere escalação dentro de um orçamento respeitando a formação.
-    Formação suportada: '4-3-3', '4-4-2', '3-5-2', '3-4-3'.
-    """
     formacoes = {
         "4-3-3": {"Goleiro": 1, "Lateral": 2, "Zagueiro": 2, "Meia": 3, "Atacante": 3},
         "4-4-2": {"Goleiro": 1, "Lateral": 2, "Zagueiro": 2, "Meia": 4, "Atacante": 2},
