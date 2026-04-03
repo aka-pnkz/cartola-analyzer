@@ -21,20 +21,29 @@ def _safe_get(d: dict, *keys, default=None):
 def build_partidas_df(rodadas: list[int]) -> pd.DataFrame:
     """Agrega partidas de múltiplas rodadas em um DataFrame."""
     clubes_raw = get_clubes() or {}
-    clubes = {int(k): v.get("nome_curto", str(k)) for k, v in clubes_raw.items()}
+
+    clubes = {
+        int(k): v.get("nome", v.get("abreviacao", str(k)))
+        for k, v in clubes_raw.items()
+    }
 
     rows = []
     for rodada in rodadas:
         data = get_partidas(rodada)
         if not data:
             continue
-        for partida in data.get("partidas", []):
+
+        partidas = data.get("partidas", [])
+        for partida in partidas:
+            clube_casa_id = partida.get("clube_casa_id")
+            clube_visitante_id = partida.get("clube_visitante_id")
+
             rows.append({
                 "rodada": rodada,
-                "clube_casa_id": partida.get("clube_casa_id"),
-                "clube_casa": clubes.get(partida.get("clube_casa_id"), "?"),
-                "clube_visitante_id": partida.get("clube_visitante_id"),
-                "clube_visitante": clubes.get(partida.get("clube_visitante_id"), "?"),
+                "clube_casa_id": clube_casa_id,
+                "clube_casa": clubes.get(clube_casa_id, str(clube_casa_id)),
+                "clube_visitante_id": clube_visitante_id,
+                "clube_visitante": clubes.get(clube_visitante_id, str(clube_visitante_id)),
                 "placar_casa": partida.get("placar_oficial_mandante"),
                 "placar_visitante": partida.get("placar_oficial_visitante"),
                 "valida": partida.get("valida", False),
@@ -46,6 +55,7 @@ def build_partidas_df(rodadas: list[int]) -> pd.DataFrame:
 
     df["placar_casa"] = pd.to_numeric(df["placar_casa"], errors="coerce")
     df["placar_visitante"] = pd.to_numeric(df["placar_visitante"], errors="coerce")
+
     return df
 
 
