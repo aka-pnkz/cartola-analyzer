@@ -1,5 +1,6 @@
 """
 Cálculo do Score Anti-Mitada (SAM) para atletas do Cartola FC.
+Versão revisada com montagem de escalação por reserva mínima e fallback robusto.
 """
 import pandas as pd
 import numpy as np
@@ -20,9 +21,6 @@ def _minmax(series: pd.Series) -> pd.Series:
 
 
 def calcular_sam(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calcula o Score Anti-Mitada (SAM) para um DataFrame de atletas.
-    """
     if df.empty:
         return df
 
@@ -44,7 +42,7 @@ def calcular_sam(df: pd.DataFrame) -> pd.DataFrame:
     ).round(4)
 
     df["sam_pct"] = (df["sam"] * 100).round(1)
-    df = df.sort_values("sam", ascending=False).reset_index(drop=True)
+    df = df.sort_values(["sam", "media"], ascending=[False, False]).reset_index(drop=True)
     df["ranking"] = df.index + 1
     return df
 
@@ -78,18 +76,18 @@ def build_atletas_df() -> pd.DataFrame:
             "posicao": POSICAO_MAP.get(a.get("posicao_id"), "?"),
             "status_id": a.get("status_id"),
             "status": STATUS_MAP.get(a.get("status_id"), "?"),
-            "preco": a.get("preco_num", 0) or 0,
-            "variacao": a.get("variacao_num", 0) or 0,
-            "media": a.get("media_num", 0) or 0,
-            "jogos": a.get("jogos_num", 0) or 0,
-            "pontos_rodada": a.get("pontos_num", 0) or 0,
-            "gols": scouts.get("G", 0) or 0,
-            "assistencias": scouts.get("A", 0) or 0,
-            "faltas": scouts.get("FC", 0) or 0,
-            "amarelos": scouts.get("CA", 0) or 0,
-            "vermelhos": scouts.get("CV", 0) or 0,
-            "defesas_dificeis": scouts.get("DD", 0) or 0,
-            "finalizacoes": scouts.get("FT", 0) or 0,
+            "preco": float(a.get("preco_num", 0) or 0),
+            "variacao": float(a.get("variacao_num", 0) or 0),
+            "media": float(a.get("media_num", 0) or 0),
+            "jogos": int(a.get("jogos_num", 0) or 0),
+            "pontos_rodada": float(a.get("pontos_num", 0) or 0),
+            "gols": int(scouts.get("G", 0) or 0),
+            "assistencias": int(scouts.get("A", 0) or 0),
+            "faltas": int(scouts.get("FC", 0) or 0),
+            "amarelos": int(scouts.get("CA", 0) or 0),
+            "vermelhos": int(scouts.get("CV", 0) or 0),
+            "defesas_dificeis": int(scouts.get("DD", 0) or 0),
+            "finalizacoes": int(scouts.get("FT", 0) or 0),
         })
 
     df = pd.DataFrame(rows)
@@ -97,126 +95,189 @@ def build_atletas_df() -> pd.DataFrame:
         return df
 
     df = df[df["preco"] > 0].copy()
-    df["custo_beneficio"] = df["media"] / df["preco"].replace(0, np.nan)
-    df["custo_beneficio"] = df["custo_beneficio"].fillna(0)
+    df["custo_beneficio"] = (df["media"] / df["preco"].replace(0, np.nan)).fillna(0)
 
     return calcular_sam(df)
 
 
-def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "4-3-3") -> pd.DataFrame:
-    formacoes = {
-        "4-3-3": {"Goleiro": 1, "Lateral": 2, "Zagueiro": 2, "Meia": 3, "Atacante": 3, "Técnico": 1},
-        "4-4-2": {"Goleiro": 1, "Lateral": 2, "Zagueiro": 2, "Meia": 4, "Atacante": 2, "Técnico": 1},
-        "3-5-2": {"Goleiro": 1, "Lateral": 0, "Zagueiro": 3, "Meia": 5, "Atacante": 2, "Técnico": 1},
-        "3-4-3": {"Goleiro": 1, "Lateral": 0, "Zagueiro": 3, "Meia": 4, "Atacante": 3, "Técnico": 1},
-    }
+FORMACOES = {
+    "4-3-3": {"Goleiro": 1, "Lateral": 2, "Zagueiro": 2, "Meia": 3, "Atacante": 3, "Técnico": 1},
+    "4-4-2": {"Goleiro": 1, "Lateral": 2, "Zagueiro": 2, "Meia": 4, "Atacante": 2, "Técnico": 1},
+    "3-5-2": {"Goleiro": 1, "Lateral": 0, "Zagueiro": 3, "Meia": 5, "Atacante": 2, "Técnico": 1},
+    "3-4-3": {"Goleiro": 1, "Lateral": 0, "Zagueiro": 3, "Meia": 4, "Atacante": 3, "Técnico": 1},
+}
 
-    slots = formacoes.get(formacao, formacoes["4-3-3"])
+ORDEM_POS = ["Goleiro", "Lateral", "Zagueiro", "Meia", "Atacante", "Técnico"]
+ORDEM_MAP = {
+    "Goleiro": 1,
+    "Lateral": 2,
+    "Zagueiro": 3,
+    "Meia": 4,
+    "Atacante": 5,
+    "Técnico": 6,
+}
 
-    def montar_time(df_base: pd.DataFrame) -> pd.DataFrame:
-        df_sorted = df_base.sort_values(
-            ["status_id", "sam", "media"],
-            ascending=[True, False, False]
-        ).copy()
 
-        if df_sorted.empty:
-            return pd.DataFrame()
+def diagnostico_escalacao(df: pd.DataFrame, orcamento: float, formacao: str = "4-3-3") -> dict:
+    slots = FORMACOES.get(formacao, FORMACOES["4-3-3"])
+    diag = {"orcamento": float(orcamento), "formacao": formacao, "posicoes": {}}
 
-        def custo_minimo_restante(df_ref, faltantes, ids_ignorados):
-            total = 0.0
-            for pos, qtd in faltantes.items():
-                if qtd <= 0:
-                    continue
+    for pos, qtd in slots.items():
+        pool = df[df["posicao"] == pos].copy()
+        prov = pool[pool["status_id"] == 2].copy()
+        aceit = pool[~pool["status_id"].isin([5, 6, 7])].copy()
 
-                pool = df_ref[
-                    (df_ref["posicao"] == pos) &
-                    (~df_ref["id"].isin(ids_ignorados))
-                ].sort_values("preco", ascending=True)
-
-                if len(pool) < qtd:
-                    return None
-
-                total += pool.head(qtd)["preco"].sum()
-
-            return float(total)
-
-        selecionados = []
-        ids_sel = set()
-        gasto = 0.0
-        faltantes = slots.copy()
-        ordem_posicoes = ["Goleiro", "Lateral", "Zagueiro", "Meia", "Atacante", "Técnico"]
-
-        for posicao in ordem_posicoes:
-            qtd = slots.get(posicao, 0)
-            if qtd == 0:
-                continue
-
-            candidatos = df_sorted[
-                (df_sorted["posicao"] == posicao) &
-                (~df_sorted["id"].isin(ids_sel))
-            ].copy()
-
-            escolhidos_pos = 0
-
-            for _, row in candidatos.iterrows():
-                if escolhidos_pos >= qtd:
-                    break
-
-                preco_atual = float(row["preco"])
-                faltantes_teste = faltantes.copy()
-                faltantes_teste[posicao] -= 1
-                ids_teste = ids_sel | {row["id"]}
-                custo_restante = custo_minimo_restante(df_sorted, faltantes_teste, ids_teste)
-
-                if custo_restante is None:
-                    continue
-
-                if gasto + preco_atual + custo_restante <= orcamento:
-                    selecionados.append(row.to_dict())
-                    ids_sel.add(row["id"])
-                    gasto += preco_atual
-                    escolhidos_pos += 1
-                    faltantes[posicao] -= 1
-
-            if escolhidos_pos < qtd:
-                return pd.DataFrame()
-
-        result = pd.DataFrame(selecionados)
-
-        if not result.empty:
-            result["gasto_acumulado"] = result["preco"].cumsum()
-
-        if len(result[result["posicao"] != "Técnico"]) != 11 or len(result[result["posicao"] == "Técnico"]) != 1:
-            return pd.DataFrame()
-
-        ordem = {
-            "Goleiro": 1,
-            "Lateral": 2,
-            "Zagueiro": 3,
-            "Meia": 4,
-            "Atacante": 5,
-            "Técnico": 6,
+        diag["posicoes"][pos] = {
+            "necessarios": int(qtd),
+            "provaveis": int(len(prov)),
+            "aceitaveis": int(len(aceit)),
+            "mais_barato_provavel": float(prov["preco"].min()) if not prov.empty else None,
+            "mais_barato_aceitavel": float(aceit["preco"].min()) if not aceit.empty else None,
         }
 
-        return result.sort_values(
+    return diag
+
+
+def _montar_guloso_com_reserva(df_base: pd.DataFrame, orcamento: float, slots: dict, status_prioridade: bool = True) -> pd.DataFrame:
+    df_ref = df_base.copy()
+
+    if status_prioridade:
+        prioridade = df_ref["status_id"].map({2: 0, 3: 1}).fillna(2)
+        df_ref = df_ref.assign(_prioridade_status=prioridade).sort_values(
+            ["_prioridade_status", "sam", "media"],
+            ascending=[True, False, False]
+        )
+    else:
+        df_ref = df_ref.sort_values(["sam", "media"], ascending=[False, False])
+
+    def custo_minimo_restante(faltantes, ids_ignorados):
+        total = 0.0
+
+        for pos, qtd in faltantes.items():
+            if qtd <= 0:
+                continue
+
+            pool = df_ref[
+                (df_ref["posicao"] == pos) &
+                (~df_ref["id"].isin(ids_ignorados))
+            ].sort_values("preco", ascending=True)
+
+            if len(pool) < qtd:
+                return None
+
+            total += float(pool.head(qtd)["preco"].sum())
+
+        return total
+
+    selecionados = []
+    ids_sel = set()
+    gasto = 0.0
+    faltantes = slots.copy()
+
+    for posicao in ORDEM_POS:
+        qtd = slots.get(posicao, 0)
+        if qtd <= 0:
+            continue
+
+        candidatos = df_ref[
+            (df_ref["posicao"] == posicao) &
+            (~df_ref["id"].isin(ids_sel))
+        ]
+
+        escolhidos = 0
+
+        for _, row in candidatos.iterrows():
+            if escolhidos >= qtd:
+                break
+
+            faltantes_teste = faltantes.copy()
+            faltantes_teste[posicao] -= 1
+            ids_teste = ids_sel | {row["id"]}
+            restante = custo_minimo_restante(faltantes_teste, ids_teste)
+
+            if restante is None:
+                continue
+
+            preco = float(row["preco"])
+
+            if gasto + preco + restante <= float(orcamento):
+                selecionados.append(row.to_dict())
+                ids_sel.add(row["id"])
+                gasto += preco
+                escolhidos += 1
+                faltantes[posicao] -= 1
+
+        if escolhidos < qtd:
+            return pd.DataFrame()
+
+    result = pd.DataFrame(selecionados)
+    if result.empty:
+        return result
+
+    result["gasto_acumulado"] = result["preco"].cumsum()
+
+    jogadores = len(result[result["posicao"] != "Técnico"])
+    tecnicos = len(result[result["posicao"] == "Técnico"])
+
+    if jogadores != 11 or tecnicos != 1:
+        return pd.DataFrame()
+
+    return result.sort_values(
+        by=["posicao"],
+        key=lambda s: s.map(ORDEM_MAP)
+    ).reset_index(drop=True)
+
+
+def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "4-3-3") -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+
+    slots = FORMACOES.get(formacao, FORMACOES["4-3-3"])
+
+    tentativas = [
+        df[df["status_id"] == 2].copy(),
+        df[df["status_id"].isin([2, 3])].copy(),
+        df[~df["status_id"].isin([5, 6, 7])].copy(),
+    ]
+
+    for tentativa in tentativas:
+        result = _montar_guloso_com_reserva(tentativa, orcamento, slots, status_prioridade=True)
+        if not result.empty:
+            return result
+
+    elegiveis = df[~df["status_id"].isin([5, 6, 7])].copy()
+
+    mais_baratos = []
+    ids_sel = set()
+
+    for pos in ORDEM_POS:
+        qtd = slots.get(pos, 0)
+        if qtd <= 0:
+            continue
+
+        pool = elegiveis[
+            (elegiveis["posicao"] == pos) &
+            (~elegiveis["id"].isin(ids_sel))
+        ].sort_values("preco", ascending=True)
+
+        if len(pool) < qtd:
+            return pd.DataFrame()
+
+        escolha = pool.head(qtd)
+        ids_sel.update(escolha["id"].tolist())
+        mais_baratos.append(escolha)
+
+    result = pd.concat(mais_baratos, ignore_index=True) if mais_baratos else pd.DataFrame()
+
+    if result.empty:
+        return result
+
+    if float(result["preco"].sum()) <= float(orcamento):
+        result = result.sort_values(
             by=["posicao"],
-            key=lambda s: s.map(ordem)
+            key=lambda s: s.map(ORDEM_MAP)
         ).reset_index(drop=True)
+        result["gasto_acumulado"] = result["preco"].cumsum()
+        return result
 
-    # tentativa 1: apenas prováveis
-    df_provaveis = df[df["status_id"] == 2].copy()
-    resultado = montar_time(df_provaveis)
-
-    if not resultado.empty:
-        return resultado
-
-    # tentativa 2: prováveis + dúvidas, suspensos e lesionados continuam fora
-    df_fallback = df[df["status_id"].isin([2, 3])].copy()
-    resultado = montar_time(df_fallback)
-
-    if not resultado.empty:
-        return resultado
-
-    # tentativa 3: qualquer atleta válido de mercado
-    df_final = df[~df["status_id"].isin([5, 6, 7])].copy()
-    return montar_time(df_final)
+    return pd.DataFrame()
