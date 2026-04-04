@@ -46,7 +46,7 @@ with st.sidebar:
 
 df = build_atletas_df(perfil=perfil)
 
-if df.empty:
+if df is None or df.empty:
     st.error("Sem dados disponíveis.")
     st.stop()
 
@@ -54,14 +54,13 @@ st.caption(f"Perfil ativo: **{perfil}**")
 
 escalacao = recomendados_por_faixa(df, orcamento, formacao)
 
-if escalacao.empty:
+if escalacao is None or escalacao.empty:
     st.warning(
         "Não foi possível montar uma escalação completa com 11 jogadores + 1 técnico "
         "dentro do orçamento e da formação selecionada."
     )
 else:
     qtd_jogadores = len(escalacao[escalacao["posicao"] != "Técnico"])
-    qtd_tecnicos = len(escalacao[escalacao["posicao"] == "Técnico"])
     gasto_total = float(escalacao["preco"].sum())
     media_total = float(escalacao["media"].sum())
     media_time = media_total / qtd_jogadores if qtd_jogadores else 0.0
@@ -92,7 +91,7 @@ else:
         motivo = []
         if row.get("ataque_bruto", 0) > row.get("defesa_bruto", 0):
             motivo.append("força ofensiva")
-        if row.get("defesa_bruto", 0) >= row.get("ataque_bruto", 0):
+        else:
             motivo.append("segurança defensiva")
         if row.get("base_bruto", 0) > 0:
             motivo.append("scout de base")
@@ -134,17 +133,18 @@ if mostrar_top:
     pos_filtro = None if posicao_top == "Todas" else posicao_top
     top_df = top_por_perfil(df, posicao=pos_filtro, n=15)
 
-    colunas_top = [
-        "nome", "clube", "posicao", "status", "preco", "media",
-        "score_pct", "ataque_bruto", "defesa_bruto", "base_bruto"
-    ]
-    colunas_top = [c for c in colunas_top if c in top_df.columns]
+    if top_df is not None and not top_df.empty:
+        colunas_top = [
+            "nome", "clube", "posicao", "status", "preco", "media",
+            "score_pct", "ataque_bruto", "defesa_bruto", "base_bruto"
+        ]
+        colunas_top = [c for c in colunas_top if c in top_df.columns]
 
-    st.dataframe(
-        top_df[colunas_top],
-        use_container_width=True,
-        hide_index=True,
-    )
+        st.dataframe(
+            top_df[colunas_top],
+            use_container_width=True,
+            hide_index=True,
+        )
 
 if mostrar_debug:
     st.subheader("🧪 Debug de posições retornadas pela API")
