@@ -1,9 +1,8 @@
-from datetime import datetime
 import pandas as pd
 
 
 def gerar_alertas(df: pd.DataFrame, referencia_evento=None) -> pd.DataFrame:
-    if df.empty:
+    if df is None or df.empty:
         return pd.DataFrame()
 
     agora = pd.Timestamp.now()
@@ -142,15 +141,15 @@ def filtrar_alertas(
     posicao: str | None = None,
     clube: str | None = None,
 ) -> pd.DataFrame:
-    if alertas_df.empty:
-        return alertas_df
+    if alertas_df is None or alertas_df.empty:
+        return pd.DataFrame()
 
     base = alertas_df.copy()
 
     if tipo and tipo != "Todos":
         base = base[base["tipo"] == tipo]
 
-    if posicao and posicao != "Todos":
+    if posicao and posicao != "Todas":
         base = base[base["posicao"] == posicao]
 
     if clube and clube != "Todos":
