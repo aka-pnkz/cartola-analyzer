@@ -4,6 +4,13 @@ Módulo de comunicação com a API do Cartola FC.
 import requests
 import streamlit as st
 from typing import Optional
+from utils.api import get_mercado_status, STATUS_MERCADO_NOME
+
+status_raw = get_mercado_status() or {}
+
+rodada_atual = status_raw.get("rodada_atual", "?") if isinstance(status_raw, dict) else "?"
+status_mercado_id = status_raw.get("status_mercado") if isinstance(status_raw, dict) else None
+status_mercado = STATUS_MERCADO_NOME.get(status_mercado_id, str(status_mercado_id or "?"))
 
 BASE_URL = "https://api.cartola.globo.com"
 
