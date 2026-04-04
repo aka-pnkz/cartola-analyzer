@@ -1,6 +1,5 @@
 """
 Módulo de comunicação com a API do Cartola FC.
-Fornece funções para buscar atletas, mercado, rodadas e ligas.
 """
 import requests
 import streamlit as st
@@ -13,14 +12,19 @@ HEADERS = {
     "Accept": "application/json",
 }
 
+
 def _get(endpoint: str, params: dict = None) -> Optional[dict | list]:
-    """GET genérico com tratamento de erros."""
     try:
-        resp = requests.get(f"{BASE_URL}{endpoint}", headers=HEADERS, params=params, timeout=10)
+        resp = requests.get(
+            f"{BASE_URL}{endpoint}",
+            headers=HEADERS,
+            params=params,
+            timeout=10,
+        )
         resp.raise_for_status()
         return resp.json()
     except requests.exceptions.HTTPError as e:
-        st.error(f"Erro HTTP {resp.status_code}: {e}")
+        st.error(f"Erro HTTP: {e}")
     except requests.exceptions.ConnectionError:
         st.error("Sem conexão com a internet.")
     except requests.exceptions.Timeout:
@@ -50,26 +54,6 @@ def get_clubes() -> Optional[dict]:
     return _get("/clubes")
 
 
-@st.cache_data(ttl=3600)
-def get_posicoes() -> Optional[dict]:
-    return _get("/posicoes")
-
-
-@st.cache_data(ttl=300)
-def get_pontuados(rodada: int) -> Optional[dict]:
-    return _get(f"/atletas/pontuados/{rodada}")
-
-
-@st.cache_data(ttl=3600)
-def get_scouts() -> Optional[dict]:
-    return _get("/scouts")
-
-
-@st.cache_data(ttl=600)
-def get_liga(slug: str) -> Optional[dict]:
-    return _get(f"/auth/liga/{slug}")
-
-
 POSICAO_MAP = {
     1: "Goleiro",
     2: "Lateral",
@@ -96,24 +80,9 @@ STATUS_MERCADO_NOME = {
 
 
 @st.cache_data(ttl=3600)
-def get_clubes_mapa_nome() -> dict[int, str]:
-    """
-    Retorna um mapa {clube_id: nome do clube}.
-    """
-    clubes = get_clubes() or {}
-    return {
-        int(k): v.get("nome", str(k))
-        for k, v in clubes.items()
-    }
-
-
-@st.cache_data(ttl=3600)
 def get_clubes_mapa_curto() -> dict[int, str]:
-    """
-    Retorna um mapa {clube_id: nome curto / abreviação do clube}.
-    """
     clubes = get_clubes() or {}
     return {
-        int(k): v.get("nome_curto", v.get("abreviacao", str(k)))
+        int(k): v.get("nome", v.get("nome_curto", v.get("abreviacao", str(k))))
         for k, v in clubes.items()
     }
