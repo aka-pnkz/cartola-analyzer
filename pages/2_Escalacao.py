@@ -1,5 +1,5 @@
 import streamlit as st
-from utils.score_mitada import build_atletas_df, recomendados_por_faixa
+from utils.score_mitada import build_atletas_df, recomendados_por_faixa, diagnostico_escalacao
 
 st.set_page_config(page_title="Escalação | Cartola Analyzer", page_icon="📋", layout="wide")
 st.title("📋 Escalação Inteligente")
@@ -23,6 +23,7 @@ with st.sidebar:
     orcamento = round(orcamento, 2)
 
     formacao = st.selectbox("🔢 Formação", ["4-3-3", "4-4-2", "3-5-2", "3-4-3"])
+    mostrar_diag = st.toggle("Mostrar diagnóstico", value=True)
 
 escalacao = recomendados_por_faixa(df, orcamento, formacao)
 
@@ -31,6 +32,28 @@ if escalacao.empty:
         "Não foi possível montar uma escalação completa com 11 jogadores + 1 técnico "
         "dentro do orçamento e da formação selecionada."
     )
+
+    if mostrar_diag:
+        diag = diagnostico_escalacao(df, orcamento, formacao)
+        st.subheader("🩺 Diagnóstico da escalação")
+
+        rows = []
+        for pos, info in diag["posicoes"].items():
+            rows.append({
+                "Posição": pos,
+                "Necessários": info["necessarios"],
+                "Prováveis": info["provaveis"],
+                "Aceitáveis": info["aceitaveis"],
+                "Mais barato provável": info["mais_barato_provavel"],
+                "Mais barato aceitável": info["mais_barato_aceitavel"],
+            })
+
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+        st.info(
+            "Se faltarem atletas em alguma posição ou se o custo mínimo por posição "
+            "já ultrapassar o orçamento, a escalação não conseguirá fechar."
+        )
+
 else:
     qtd_jogadores = len(escalacao[escalacao["posicao"] != "Técnico"])
     qtd_tecnicos = len(escalacao[escalacao["posicao"] == "Técnico"])
