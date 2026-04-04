@@ -61,8 +61,8 @@ if escalacao.empty:
         debug_df = resumo_posicoes_debug(df)
         st.dataframe(debug_df, use_container_width=True, hide_index=True)
         st.info(
-            "Se Goleiro e Técnico não aparecerem aqui, o problema está no mapeamento "
-            "ou no payload recebido da API, não na lógica de escalação."
+            "Se Goleiro e Técnico aparecem aqui, mas não entram na escalação, "
+            "o bloqueio está na lógica de seleção e não no retorno da API."
         )
 
 else:
