@@ -19,6 +19,36 @@ def _minmax(series: pd.Series) -> pd.Series:
     return (series - mn) / (mx - mn)
 
 
+def calcular_sam(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calcula o Score Anti-Mitada (SAM) para um DataFrame de atletas.
+    """
+    if df.empty:
+        return df
+
+    df = df.copy()
+
+    for col in ["media", "custo_beneficio", "variacao"]:
+        df[f"{col}_norm"] = df.groupby("posicao_id")[col].transform(_minmax)
+
+    df["consistencia_norm"] = _minmax(-df["variacao"].abs())
+    df["tendencia_norm"] = _minmax(df["variacao"])
+    df["casa_fora_norm"] = _minmax(df["variacao"])
+
+    df["sam"] = (
+        W_MEDIA * df["media_norm"] +
+        W_CONSISTENCIA * df["consistencia_norm"] +
+        W_CUSTO * df["custo_beneficio_norm"] +
+        W_CASA_FORA * df["casa_fora_norm"] +
+        W_TENDENCIA * df["tendencia_norm"]
+    ).round(4)
+
+    df["sam_pct"] = (df["sam"] * 100).round(1)
+    df = df.sort_values("sam", ascending=False).reset_index(drop=True)
+    df["ranking"] = df.index + 1
+    return df
+
+
 def build_atletas_df() -> pd.DataFrame:
     data = get_atletas_mercado()
     if not data:
@@ -70,25 +100,7 @@ def build_atletas_df() -> pd.DataFrame:
     df["custo_beneficio"] = df["media"] / df["preco"].replace(0, np.nan)
     df["custo_beneficio"] = df["custo_beneficio"].fillna(0)
 
-    for col in ["media", "custo_beneficio", "variacao"]:
-        df[f"{col}_norm"] = df.groupby("posicao_id")[col].transform(_minmax)
-
-    df["consistencia_norm"] = _minmax(-df["variacao"].abs())
-    df["tendencia_norm"] = _minmax(df["variacao"])
-    df["casa_fora_norm"] = _minmax(df["variacao"])
-
-    df["sam"] = (
-        W_MEDIA * df["media_norm"] +
-        W_CONSISTENCIA * df["consistencia_norm"] +
-        W_CUSTO * df["custo_beneficio_norm"] +
-        W_CASA_FORA * df["casa_fora_norm"] +
-        W_TENDENCIA * df["tendencia_norm"]
-    ).round(4)
-
-    df["sam_pct"] = (df["sam"] * 100).round(1)
-    df = df.sort_values("sam", ascending=False).reset_index(drop=True)
-    df["ranking"] = df.index + 1
-    return df
+    return calcular_sam(df)
 
 
 def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "4-3-3") -> pd.DataFrame:
@@ -121,6 +133,7 @@ def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "
                 return None
 
             total += pool.head(qtd)["preco"].sum()
+
         return float(total)
 
     selecionados = []
