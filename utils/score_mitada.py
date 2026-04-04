@@ -1,6 +1,6 @@
 """
 Cálculo do Score Anti-Mitada (SAM) para atletas do Cartola FC.
-Versão revisada com montagem de escalação por reserva mínima e fallback robusto.
+Versão revisada com depuração de posições.
 """
 import pandas as pd
 import numpy as np
@@ -18,6 +18,18 @@ def _minmax(series: pd.Series) -> pd.Series:
     if mx == mn:
         return pd.Series(0.5, index=series.index)
     return (series - mn) / (mx - mn)
+
+
+def _resolver_posicao(atleta: dict) -> tuple[int, str]:
+    pos_id = atleta.get("posicao_id")
+
+    pos_obj = atleta.get("posicao")
+    if isinstance(pos_obj, dict):
+        nome = pos_obj.get("nome") or pos_obj.get("abreviacao")
+        if nome:
+            return pos_id, nome
+
+    return pos_id, POSICAO_MAP.get(pos_id, f"Posição {pos_id}")
 
 
 def calcular_sam(df: pd.DataFrame) -> pd.DataFrame:
@@ -66,16 +78,17 @@ def build_atletas_df() -> pd.DataFrame:
     for a in atletas:
         scouts = a.get("scout", {})
         clube_id = a.get("clube_id")
+        posicao_id, posicao_nome = _resolver_posicao(a)
 
         rows.append({
             "id": a.get("atleta_id"),
             "nome": a.get("apelido", "?"),
             "clube_id": clube_id,
             "clube": clubes.get(clube_id, str(clube_id)),
-            "posicao_id": a.get("posicao_id"),
-            "posicao": POSICAO_MAP.get(a.get("posicao_id"), "?"),
+            "posicao_id": posicao_id,
+            "posicao": posicao_nome,
             "status_id": a.get("status_id"),
-            "status": STATUS_MAP.get(a.get("status_id"), "?"),
+            "status": STATUS_MAP.get(a.get("status_id"), f"Status {a.get('status_id')}"),
             "preco": float(a.get("preco_num", 0) or 0),
             "variacao": float(a.get("variacao_num", 0) or 0),
             "media": float(a.get("media_num", 0) or 0),
@@ -100,6 +113,22 @@ def build_atletas_df() -> pd.DataFrame:
     return calcular_sam(df)
 
 
+def resumo_posicoes_debug(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+
+    return (
+        df.groupby(["posicao_id", "posicao"])
+        .agg(
+            qtd=("id", "count"),
+            menor_preco=("preco", "min"),
+            maior_preco=("preco", "max"),
+        )
+        .reset_index()
+        .sort_values(["posicao_id", "posicao"])
+    )
+
+
 FORMACOES = {
     "4-3-3": {"Goleiro": 1, "Lateral": 2, "Zagueiro": 2, "Meia": 3, "Atacante": 3, "Técnico": 1},
     "4-4-2": {"Goleiro": 1, "Lateral": 2, "Zagueiro": 2, "Meia": 4, "Atacante": 2, "Técnico": 1},
@@ -108,14 +137,7 @@ FORMACOES = {
 }
 
 ORDEM_POS = ["Goleiro", "Lateral", "Zagueiro", "Meia", "Atacante", "Técnico"]
-ORDEM_MAP = {
-    "Goleiro": 1,
-    "Lateral": 2,
-    "Zagueiro": 3,
-    "Meia": 4,
-    "Atacante": 5,
-    "Técnico": 6,
-}
+ORDEM_MAP = {"Goleiro": 1, "Lateral": 2, "Zagueiro": 3, "Meia": 4, "Atacante": 5, "Técnico": 6}
 
 
 def diagnostico_escalacao(df: pd.DataFrame, orcamento: float, formacao: str = "4-3-3") -> dict:
@@ -222,10 +244,7 @@ def _montar_guloso_com_reserva(df_base: pd.DataFrame, orcamento: float, slots: d
     if jogadores != 11 or tecnicos != 1:
         return pd.DataFrame()
 
-    return result.sort_values(
-        by=["posicao"],
-        key=lambda s: s.map(ORDEM_MAP)
-    ).reset_index(drop=True)
+    return result.sort_values(by=["posicao"], key=lambda s: s.map(ORDEM_MAP)).reset_index(drop=True)
 
 
 def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "4-3-3") -> pd.DataFrame:
@@ -244,40 +263,5 @@ def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "
         result = _montar_guloso_com_reserva(tentativa, orcamento, slots, status_prioridade=True)
         if not result.empty:
             return result
-
-    elegiveis = df[~df["status_id"].isin([5, 6, 7])].copy()
-
-    mais_baratos = []
-    ids_sel = set()
-
-    for pos in ORDEM_POS:
-        qtd = slots.get(pos, 0)
-        if qtd <= 0:
-            continue
-
-        pool = elegiveis[
-            (elegiveis["posicao"] == pos) &
-            (~elegiveis["id"].isin(ids_sel))
-        ].sort_values("preco", ascending=True)
-
-        if len(pool) < qtd:
-            return pd.DataFrame()
-
-        escolha = pool.head(qtd)
-        ids_sel.update(escolha["id"].tolist())
-        mais_baratos.append(escolha)
-
-    result = pd.concat(mais_baratos, ignore_index=True) if mais_baratos else pd.DataFrame()
-
-    if result.empty:
-        return result
-
-    if float(result["preco"].sum()) <= float(orcamento):
-        result = result.sort_values(
-            by=["posicao"],
-            key=lambda s: s.map(ORDEM_MAP)
-        ).reset_index(drop=True)
-        result["gasto_acumulado"] = result["preco"].cumsum()
-        return result
 
     return pd.DataFrame()
