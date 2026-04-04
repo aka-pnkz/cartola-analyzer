@@ -1,89 +1,132 @@
-"""
-Sistema de alertas e notificações para o Cartola Analyzer.
-Detecta atletas em alta, queda de preço, suspensos e boas oportunidades.
-"""
+from datetime import datetime
 import pandas as pd
-from dataclasses import dataclass, field
-from typing import Literal
 
 
-AlertType = Literal["success", "warning", "error", "info"]
-
-
-@dataclass
-class Alerta:
-    tipo: AlertType
-    titulo: str
-    mensagem: str
-    atleta_id: int | None = None
-    atleta_nome: str | None = None
-
-
-def detectar_alertas(df: pd.DataFrame) -> list[Alerta]:
-    """
-    Analisa o DataFrame de atletas e retorna lista de alertas relevantes.
-    """
-    alertas: list[Alerta] = []
-
+def gerar_alertas(df: pd.DataFrame, referencia_evento=None) -> pd.DataFrame:
     if df.empty:
-        alertas.append(Alerta("info", "Sem dados", "Nenhum dado de atletas disponível."))
-        return alertas
+        return pd.DataFrame()
 
-    # ── atletas em alta (valorização > 5 C$) ──────────────────────────────
-    em_alta = df[df["variacao"] >= 5].sort_values("variacao", ascending=False).head(10)
-    for _, row in em_alta.iterrows():
-        alertas.append(Alerta(
-            tipo="success",
-            titulo=f"📈 {row['nome']} em alta",
-            mensagem=f"Valorizou +{row['variacao']:.1f} C$ | Média: {row['media']:.1f} pts | Clube: {row['clube']}",
-            atleta_id=row["id"],
-            atleta_nome=row["nome"],
-        ))
+    agora = pd.Timestamp.now()
 
-    # ── atletas em queda (desvalorização > 3 C$) ──────────────────────────
-    em_queda = df[df["variacao"] <= -3].sort_values("variacao").head(10)
-    for _, row in em_queda.iterrows():
-        alertas.append(Alerta(
-            tipo="warning",
-            titulo=f"📉 {row['nome']} em queda",
-            mensagem=f"Desvalorizou {row['variacao']:.1f} C$ | Média: {row['media']:.1f} pts | Clube: {row['clube']}",
-            atleta_id=row["id"],
-            atleta_nome=row["nome"],
-        ))
+    if referencia_evento is None:
+        evento_em = agora
+    else:
+        evento_em = pd.to_datetime(referencia_evento, errors="coerce")
+        if pd.isna(evento_em):
+            evento_em = agora
 
-    # ── atletas suspensos ou lesionados ────────────────────────────────────
-    problemas = df[df["status_id"].isin([5, 6])]
-    for _, row in problemas.iterrows():
-        alertas.append(Alerta(
-            tipo="error",
-            titulo=f"{row['status']} {row['nome']}",
-            mensagem=f"Posição: {row['posicao']} | Clube: {row['clube']} | Preço: {row['preco']:.1f} C$",
-            atleta_id=row["id"],
-            atleta_nome=row["nome"],
-        ))
+    alertas = []
 
-    # ── oportunidades (SAM alto + preço baixo) ─────────────────────────────
-    if "sam_pct" in df.columns:
-        oportunidades = df[
-            (df["sam_pct"] >= 70) &
-            (df["preco"] <= df["preco"].median()) &
-            (df["status_id"] == 2)
-        ].sort_values("sam_pct", ascending=False).head(5)
+    for _, row in df.iterrows():
+        nome = row.get("nome", "Atleta")
+        clube = row.get("clube", "-")
+        posicao = row.get("posicao", "-")
+        status = row.get("status", "-")
+        preco = float(row.get("preco", 0) or 0)
+        media = float(row.get("media", 0) or 0)
+        score_pct = float(row.get("score_pct", 0) or 0)
+        variacao = float(row.get("variacao", 0) or 0)
+        ataque = float(row.get("ataque_bruto", 0) or 0)
+        defesa = float(row.get("defesa_bruto", 0) or 0)
+        base = float(row.get("base_bruto", 0) or 0)
+        disciplina = float(row.get("disciplina_bruto", 0) or 0)
 
-        for _, row in oportunidades.iterrows():
-            alertas.append(Alerta(
-                tipo="info",
-                titulo=f"💡 Oportunidade: {row['nome']}",
-                mensagem=(
-                    f"SAM: {row['sam_pct']:.1f}% | Preço: {row['preco']:.1f} C$ | "
-                    f"Média: {row['media']:.1f} pts | {row['posicao']} — {row['clube']}"
-                ),
-                atleta_id=row["id"],
-                atleta_nome=row["nome"],
-            ))
+        if score_pct >= 75:
+            alertas.append({
+                "tipo": "🔥 Oportunidade",
+                "mensagem": f"{nome} está com score alto para o perfil atual.",
+                "nome": nome,
+                "clube": clube,
+                "posicao": posicao,
+                "status": status,
+                "preco": preco,
+                "media": media,
+                "score_pct": score_pct,
+                "evento_em": evento_em,
+                "criado_em": agora,
+            })
 
-    return alertas
+        if ataque >= max(defesa * 2, 8):
+            alertas.append({
+                "tipo": "⚔️ Perfil ofensivo",
+                "mensagem": f"{nome} tem forte viés ofensivo.",
+                "nome": nome,
+                "clube": clube,
+                "posicao": posicao,
+                "status": status,
+                "preco": preco,
+                "media": media,
+                "score_pct": score_pct,
+                "evento_em": evento_em,
+                "criado_em": agora,
+            })
 
+        if defesa >= max(ataque * 1.5, 6):
+            alertas.append({
+                "tipo": "🛡️ Perfil defensivo",
+                "mensagem": f"{nome} oferece segurança defensiva.",
+                "nome": nome,
+                "clube": clube,
+                "posicao": posicao,
+                "status": status,
+                "preco": preco,
+                "media": media,
+                "score_pct": score_pct,
+                "evento_em": evento_em,
+                "criado_em": agora,
+            })
 
-def filtrar_alertas(alertas: list[Alerta], tipos: list[AlertType]) -> list[Alerta]:
-    return [a for a in alertas if a.tipo in tipos]
+        if base >= 6 and score_pct >= 60:
+            alertas.append({
+                "tipo": "📈 Scout de base",
+                "mensagem": f"{nome} pontua bem sem depender tanto de gol.",
+                "nome": nome,
+                "clube": clube,
+                "posicao": posicao,
+                "status": status,
+                "preco": preco,
+                "media": media,
+                "score_pct": score_pct,
+                "evento_em": evento_em,
+                "criado_em": agora,
+            })
+
+        if disciplina >= 3:
+            alertas.append({
+                "tipo": "🚨 Risco disciplinar",
+                "mensagem": f"{nome} apresenta risco por cartões/faltas.",
+                "nome": nome,
+                "clube": clube,
+                "posicao": posicao,
+                "status": status,
+                "preco": preco,
+                "media": media,
+                "score_pct": score_pct,
+                "evento_em": evento_em,
+                "criado_em": agora,
+            })
+
+        if variacao > 0.8 and score_pct >= 55:
+            alertas.append({
+                "tipo": "💹 Tendência positiva",
+                "mensagem": f"{nome} está em tendência de valorização/alta.",
+                "nome": nome,
+                "clube": clube,
+                "posicao": posicao,
+                "status": status,
+                "preco": preco,
+                "media": media,
+                "score_pct": score_pct,
+                "evento_em": evento_em,
+                "criado_em": agora,
+            })
+
+    alertas_df = pd.DataFrame(alertas)
+
+    if alertas_df.empty:
+        return alertas_df
+
+    alertas_df["evento_em"] = pd.to_datetime(alertas_df["evento_em"], errors="coerce")
+    alertas_df["criado_em"] = pd.to_datetime(alertas_df["criado_em"], errors="coerce")
+
+    return alertas_df.sort_values(["score_pct", "criado_em"], ascending=[False, False]).reset_index(drop=True)
