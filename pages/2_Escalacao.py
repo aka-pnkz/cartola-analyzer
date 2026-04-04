@@ -4,6 +4,7 @@ from utils.score_mitada import (
     recomendados_por_faixa,
     diagnostico_escalacao,
     resumo_posicoes_debug,
+    PERFIS,
 )
 
 st.set_page_config(
@@ -13,12 +14,6 @@ st.set_page_config(
 )
 
 st.title("📋 Escalação Inteligente")
-
-df = build_atletas_df()
-
-if df.empty:
-    st.error("Sem dados disponíveis.")
-    st.stop()
 
 with st.sidebar:
     st.header("⚙️ Configurações")
@@ -38,8 +33,22 @@ with st.sidebar:
         ["4-3-3", "4-4-2", "3-5-2", "3-4-3"],
     )
 
+    perfil = st.selectbox(
+        "🎯 Perfil tático",
+        list(PERFIS.keys()),
+        index=0,
+    )
+
     mostrar_diag = st.toggle("Mostrar diagnóstico", value=True)
     mostrar_debug = st.toggle("Mostrar debug de posições", value=True)
+
+df = build_atletas_df(perfil=perfil)
+
+if df.empty:
+    st.error("Sem dados disponíveis.")
+    st.stop()
+
+st.caption(f"Perfil ativo: **{perfil}**")
 
 escalacao = recomendados_por_faixa(df, orcamento, formacao)
 
@@ -62,6 +71,7 @@ if escalacao.empty:
                 "Aceitáveis": info["aceitaveis"],
                 "Mais barato provável": info["mais_barato_provavel"],
                 "Mais barato aceitável": info["mais_barato_aceitavel"],
+                "Melhor score": info.get("melhor_score"),
             })
 
         st.dataframe(
@@ -71,8 +81,7 @@ if escalacao.empty:
         )
 
         st.info(
-            "Se os atletas aparecem no debug, mas não entram no diagnóstico como aceitáveis, "
-            "o problema está na regra de elegibilidade por status."
+            "O diagnóstico mostra oferta por posição, elegibilidade e faixa mínima de preço."
         )
 
     if mostrar_debug:
@@ -86,8 +95,8 @@ if escalacao.empty:
         )
 
         st.info(
-            "Esse quadro mostra quantos atletas vieram da API por posição, "
-            "quantos estão elegíveis, e a faixa de preços disponível."
+            "Esse quadro resume quantos atletas vieram da API por posição, "
+            "quantos estão elegíveis e qual a faixa de preço disponível."
         )
 
 else:
@@ -95,35 +104,41 @@ else:
     qtd_tecnicos = len(escalacao[escalacao["posicao"] == "Técnico"])
     gasto_total = float(escalacao["preco"].sum())
     media_total = float(escalacao["media"].sum())
-    media_time = media_total / len(escalacao[escalacao["posicao"] != "Técnico"]) if qtd_jogadores else 0
+    media_time = media_total / qtd_jogadores if qtd_jogadores else 0.0
+    score_total = float(escalacao["score"].sum()) if "score" in escalacao.columns else 0.0
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("💸 Gasto total", f"C$ {gasto_total:.2f}")
     col2.metric("📈 Média somada", f"{media_total:.1f}")
     col3.metric("📊 Média por atleta", f"{media_time:.2f}")
-    col4.metric("👥 Escalação", f"{qtd_jogadores} jogadores + {qtd_tecnicos} técnico")
+    col4.metric("🧠 Score total", f"{score_total:.2f}")
 
     st.subheader("✅ Time sugerido")
 
+    colunas_desejadas = [
+        "nome",
+        "clube",
+        "posicao",
+        "status",
+        "preco",
+        "media",
+        "score_pct",
+        "ataque_bruto",
+        "defesa_bruto",
+        "base_bruto",
+    ]
+
+    colunas_exibir = [c for c in colunas_desejadas if c in escalacao.columns]
+
     st.dataframe(
-        escalacao[
-            [
-                "nome",
-                "clube",
-                "posicao",
-                "status",
-                "preco",
-                "media",
-                "sam_pct",
-            ]
-        ],
+        escalacao[colunas_exibir],
         use_container_width=True,
         hide_index=True,
     )
 
     if mostrar_diag:
-        st.subheader("🩺 Diagnóstico da escalação")
         diag = diagnostico_escalacao(df, orcamento, formacao)
+        st.subheader("🩺 Diagnóstico da escalação")
 
         rows = []
         for pos, info in diag["posicoes"].items():
@@ -134,6 +149,7 @@ else:
                 "Aceitáveis": info["aceitaveis"],
                 "Mais barato provável": info["mais_barato_provavel"],
                 "Mais barato aceitável": info["mais_barato_aceitavel"],
+                "Melhor score": info.get("melhor_score"),
             })
 
         st.dataframe(
