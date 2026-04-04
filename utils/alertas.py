@@ -130,3 +130,30 @@ def gerar_alertas(df: pd.DataFrame, referencia_evento=None) -> pd.DataFrame:
     alertas_df["criado_em"] = pd.to_datetime(alertas_df["criado_em"], errors="coerce")
 
     return alertas_df.sort_values(["score_pct", "criado_em"], ascending=[False, False]).reset_index(drop=True)
+
+
+def detectar_alertas(df: pd.DataFrame, referencia_evento=None) -> pd.DataFrame:
+    return gerar_alertas(df, referencia_evento=referencia_evento)
+
+
+def filtrar_alertas(
+    alertas_df: pd.DataFrame,
+    tipo: str | None = None,
+    posicao: str | None = None,
+    clube: str | None = None,
+) -> pd.DataFrame:
+    if alertas_df.empty:
+        return alertas_df
+
+    base = alertas_df.copy()
+
+    if tipo and tipo != "Todos":
+        base = base[base["tipo"] == tipo]
+
+    if posicao and posicao != "Todos":
+        base = base[base["posicao"] == posicao]
+
+    if clube and clube != "Todos":
+        base = base[base["clube"] == clube]
+
+    return base.reset_index(drop=True)
