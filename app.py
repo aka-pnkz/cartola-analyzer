@@ -215,7 +215,7 @@ st.subheader("🔔 Alertas Rápidos")
 
 alertas = detectar_alertas(df_all)
 
-if not alertas:
+if alertas is None or alertas.empty:
     st.info("Nenhum alerta encontrado.")
 else:
     for alerta in alertas[:8]:
