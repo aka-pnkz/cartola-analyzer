@@ -25,7 +25,7 @@ with st.sidebar:
 
 df = build_atletas_df(perfil=perfil)
 
-if df.empty:
+if df is None or df.empty:
     st.error("Sem dados disponíveis para comparação.")
     st.stop()
 
@@ -50,7 +50,7 @@ ids_selecionados = st.multiselect(
 
 df_comp = preparar_comparacao(df, ids_selecionados)
 
-if df_comp.empty:
+if df_comp is None or df_comp.empty:
     st.info("Selecione ao menos 1 atleta para iniciar a comparação.")
     st.stop()
 
