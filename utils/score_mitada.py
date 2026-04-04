@@ -126,14 +126,18 @@ def _prioridade_status(status_id):
     return mapa.get(status_id, 3)
 
 
-def _normalizar_por_posicao(df: pd.DataFrame, coluna: str) -> pd.Series:
-    return df.groupby("posicao_id")[coluna].transform(_minmax)
+def _normalizar_por_posicao(df: pd.DataFrame, coluna_ou_serie) -> pd.Series:
+    if isinstance(coluna_ou_serie, str):
+        serie = df[coluna_ou_serie]
+    else:
+        serie = pd.Series(coluna_ou_serie, index=df.index)
 
+    aux = pd.DataFrame({
+        "posicao_id": df["posicao_id"],
+        "_valor": serie.fillna(0),
+    })
 
-def _garantir_coluna(df: pd.DataFrame, col: str) -> pd.Series:
-    if col in df.columns:
-        return df[col].fillna(0)
-    return pd.Series(0, index=df.index)
+    return aux.groupby("posicao_id")["_valor"].transform(_minmax)
 
 
 def calcular_metricas_taticas(df: pd.DataFrame) -> pd.DataFrame:
@@ -144,25 +148,12 @@ def calcular_metricas_taticas(df: pd.DataFrame) -> pd.DataFrame:
 
     for c in [
         "gols", "assistencias", "finalizacoes", "faltas",
-        "amarelos", "vermelhos", "defesas_dificeis"
+        "amarelos", "vermelhos", "defesas_dificeis",
+        "desarmes", "saldo_gols", "faltas_sofridas",
+        "finalizacoes_defendidas", "finalizacoes_fora"
     ]:
         if c not in df.columns:
             df[c] = 0
-
-    if "desarmes" not in df.columns:
-        df["desarmes"] = 0
-
-    if "saldo_gols" not in df.columns:
-        df["saldo_gols"] = 0
-
-    if "faltas_sofridas" not in df.columns:
-        df["faltas_sofridas"] = 0
-
-    if "finalizacoes_defendidas" not in df.columns:
-        df["finalizacoes_defendidas"] = 0
-
-    if "finalizacoes_fora" not in df.columns:
-        df["finalizacoes_fora"] = 0
 
     df["ataque_bruto"] = (
         df["gols"] * 8.0 +
@@ -398,7 +389,10 @@ def _aplicar_upgrades(base: pd.DataFrame, universo: pd.DataFrame, orcamento: flo
             if candidatos.empty:
                 continue
 
-            candidatos["eficiencia_upgrade"] = candidatos["delta_score"] / candidatos["delta_preco"].replace(0, 0.0001)
+            candidatos["eficiencia_upgrade"] = (
+                candidatos["delta_score"] / candidatos["delta_preco"].replace(0, 0.0001)
+            )
+
             melhor_candidato = candidatos.sort_values(
                 ["delta_score", "eficiencia_upgrade", "score"],
                 ascending=[False, False, False]
