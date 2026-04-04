@@ -1,5 +1,6 @@
 import streamlit as st
 import plotly.express as px
+
 from utils.api import get_mercado_status, STATUS_MERCADO_NOME
 from utils.score_mitada import build_atletas_df
 from utils.alertas import detectar_alertas
@@ -124,20 +125,31 @@ col_a, col_b = st.columns([1, 1.6])
 
 with col_a:
     st.subheader("📊 Atletas por Posição")
+
     pos_count = df_all.groupby("posicao").size().reset_index(name="count")
 
-    fig_pie = px.pie(
-        pos_count,
-        names="posicao",
-        values="count",
-        color_discrete_sequence=["#01696f", "#d19900", "#a12c7b", "#da7101", "#006494", "#437a22"],
-        hole=0.42,
-    )
-    fig_pie.update_layout(
-        margin=dict(t=10, b=10, l=10, r=10),
-        paper_bgcolor="rgba(0,0,0,0)",
-    )
-    st.plotly_chart(fig_pie, use_container_width=True)
+    if pos_count.empty:
+        st.info("Sem dados suficientes para o gráfico de posições.")
+    else:
+        fig_pie = px.pie(
+            pos_count,
+            names="posicao",
+            values="count",
+            color_discrete_sequence=[
+                "#01696f",
+                "#d19900",
+                "#a12c7b",
+                "#da7101",
+                "#006494",
+                "#437a22",
+            ],
+            hole=0.42,
+        )
+        fig_pie.update_layout(
+            margin=dict(t=10, b=10, l=10, r=10),
+            paper_bgcolor="rgba(0,0,0,0)",
+        )
+        st.plotly_chart(fig_pie, use_container_width=True)
 
 with col_b:
     st.subheader("📈 Média por Posição — Top 5 Atletas")
@@ -158,7 +170,14 @@ with col_b:
             y="media",
             color="posicao",
             barmode="group",
-            color_discrete_sequence=["#01696f", "#d19900", "#a12c7b", "#da7101", "#006494", "#437a22"],
+            color_discrete_sequence=[
+                "#01696f",
+                "#d19900",
+                "#a12c7b",
+                "#da7101",
+                "#006494",
+                "#437a22",
+            ],
             labels={"nome": "Atleta", "media": "Média de Pontos"},
         )
 
@@ -173,11 +192,23 @@ with col_b:
         st.plotly_chart(fig_bar, use_container_width=True)
 
 st.subheader("🏆 Top 10 Atletas por Média")
-top10 = df_all.sort_values("media", ascending=False).head(10)[
-    ["nome", "clube", "posicao", "status", "preco", "media", "variacao"]
-].copy()
 
-top10.columns = ["Atleta", "Clube", "Posição", "Status", "Preço (C$)", "Média", "Variação"]
+top10 = (
+    df_all.sort_values("media", ascending=False)
+    .head(10)[["nome", "clube", "posicao", "status", "preco", "media", "variacao"]]
+    .copy()
+)
+
+top10.columns = [
+    "Atleta",
+    "Clube",
+    "Posição",
+    "Status",
+    "Preço (C$)",
+    "Média",
+    "Variação",
+]
+
 st.dataframe(top10, use_container_width=True, hide_index=True)
 
 st.subheader("🔔 Alertas Rápidos")
