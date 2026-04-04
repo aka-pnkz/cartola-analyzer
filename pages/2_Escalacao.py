@@ -27,7 +27,10 @@ with st.sidebar:
 escalacao = recomendados_por_faixa(df, orcamento, formacao)
 
 if escalacao.empty:
-    st.warning("Não foi possível montar uma escalação completa com 11 jogadores + 1 técnico dentro dos critérios selecionados.")
+    st.warning(
+        "Não foi possível montar uma escalação completa com 11 jogadores + 1 técnico "
+        "dentro do orçamento e da formação selecionada."
+    )
 else:
     qtd_jogadores = len(escalacao[escalacao["posicao"] != "Técnico"])
     qtd_tecnicos = len(escalacao[escalacao["posicao"] == "Técnico"])
