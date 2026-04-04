@@ -112,89 +112,111 @@ def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "
     }
 
     slots = formacoes.get(formacao, formacoes["4-3-3"])
-    df_sorted = df.sort_values(["sam", "media"], ascending=[False, False]).copy()
-    df_sorted = df_sorted[df_sorted["status_id"] == 2].copy()
 
-    if df_sorted.empty:
-        return pd.DataFrame()
+    def montar_time(df_base: pd.DataFrame) -> pd.DataFrame:
+        df_sorted = df_base.sort_values(
+            ["status_id", "sam", "media"],
+            ascending=[True, False, False]
+        ).copy()
 
-    def custo_minimo_restante(df_base, faltantes, ids_ignorados):
-        total = 0.0
-        for pos, qtd in faltantes.items():
-            if qtd <= 0:
-                continue
-
-            pool = df_base[
-                (df_base["posicao"] == pos) &
-                (~df_base["id"].isin(ids_ignorados))
-            ].sort_values("preco", ascending=True)
-
-            if len(pool) < qtd:
-                return None
-
-            total += pool.head(qtd)["preco"].sum()
-
-        return float(total)
-
-    selecionados = []
-    ids_sel = set()
-    gasto = 0.0
-    ordem_posicoes = ["Goleiro", "Lateral", "Zagueiro", "Meia", "Atacante", "Técnico"]
-    faltantes = slots.copy()
-
-    for posicao in ordem_posicoes:
-        qtd = slots.get(posicao, 0)
-        if qtd == 0:
-            continue
-
-        candidatos = df_sorted[
-            (df_sorted["posicao"] == posicao) &
-            (~df_sorted["id"].isin(ids_sel))
-        ].copy()
-
-        escolhidos_pos = 0
-
-        for _, row in candidatos.iterrows():
-            if escolhidos_pos >= qtd:
-                break
-
-            preco_atual = float(row["preco"])
-            faltantes_teste = faltantes.copy()
-            faltantes_teste[posicao] -= 1
-            ids_teste = ids_sel | {row["id"]}
-            custo_restante = custo_minimo_restante(df_sorted, faltantes_teste, ids_teste)
-
-            if custo_restante is None:
-                continue
-
-            if gasto + preco_atual + custo_restante <= orcamento:
-                selecionados.append(row.to_dict())
-                ids_sel.add(row["id"])
-                gasto += preco_atual
-                escolhidos_pos += 1
-                faltantes[posicao] -= 1
-
-        if escolhidos_pos < qtd:
+        if df_sorted.empty:
             return pd.DataFrame()
 
-    result = pd.DataFrame(selecionados)
+        def custo_minimo_restante(df_ref, faltantes, ids_ignorados):
+            total = 0.0
+            for pos, qtd in faltantes.items():
+                if qtd <= 0:
+                    continue
 
-    if not result.empty:
-        result["gasto_acumulado"] = result["preco"].cumsum()
+                pool = df_ref[
+                    (df_ref["posicao"] == pos) &
+                    (~df_ref["id"].isin(ids_ignorados))
+                ].sort_values("preco", ascending=True)
 
-    if len(result[result["posicao"] != "Técnico"]) != 11 or len(result[result["posicao"] == "Técnico"]) != 1:
-        return pd.DataFrame()
+                if len(pool) < qtd:
+                    return None
 
-    ordem = {
-        "Goleiro": 1,
-        "Lateral": 2,
-        "Zagueiro": 3,
-        "Meia": 4,
-        "Atacante": 5,
-        "Técnico": 6,
-    }
+                total += pool.head(qtd)["preco"].sum()
 
-    return result.sort_values(
-        by=["posicao"],
-        key=lambda s: s.map(ordem)
-    ).reset_index(drop=True)
+            return float(total)
+
+        selecionados = []
+        ids_sel = set()
+        gasto = 0.0
+        faltantes = slots.copy()
+        ordem_posicoes = ["Goleiro", "Lateral", "Zagueiro", "Meia", "Atacante", "Técnico"]
+
+        for posicao in ordem_posicoes:
+            qtd = slots.get(posicao, 0)
+            if qtd == 0:
+                continue
+
+            candidatos = df_sorted[
+                (df_sorted["posicao"] == posicao) &
+                (~df_sorted["id"].isin(ids_sel))
+            ].copy()
+
+            escolhidos_pos = 0
+
+            for _, row in candidatos.iterrows():
+                if escolhidos_pos >= qtd:
+                    break
+
+                preco_atual = float(row["preco"])
+                faltantes_teste = faltantes.copy()
+                faltantes_teste[posicao] -= 1
+                ids_teste = ids_sel | {row["id"]}
+                custo_restante = custo_minimo_restante(df_sorted, faltantes_teste, ids_teste)
+
+                if custo_restante is None:
+                    continue
+
+                if gasto + preco_atual + custo_restante <= orcamento:
+                    selecionados.append(row.to_dict())
+                    ids_sel.add(row["id"])
+                    gasto += preco_atual
+                    escolhidos_pos += 1
+                    faltantes[posicao] -= 1
+
+            if escolhidos_pos < qtd:
+                return pd.DataFrame()
+
+        result = pd.DataFrame(selecionados)
+
+        if not result.empty:
+            result["gasto_acumulado"] = result["preco"].cumsum()
+
+        if len(result[result["posicao"] != "Técnico"]) != 11 or len(result[result["posicao"] == "Técnico"]) != 1:
+            return pd.DataFrame()
+
+        ordem = {
+            "Goleiro": 1,
+            "Lateral": 2,
+            "Zagueiro": 3,
+            "Meia": 4,
+            "Atacante": 5,
+            "Técnico": 6,
+        }
+
+        return result.sort_values(
+            by=["posicao"],
+            key=lambda s: s.map(ordem)
+        ).reset_index(drop=True)
+
+    # tentativa 1: apenas prováveis
+    df_provaveis = df[df["status_id"] == 2].copy()
+    resultado = montar_time(df_provaveis)
+
+    if not resultado.empty:
+        return resultado
+
+    # tentativa 2: prováveis + dúvidas, suspensos e lesionados continuam fora
+    df_fallback = df[df["status_id"].isin([2, 3])].copy()
+    resultado = montar_time(df_fallback)
+
+    if not resultado.empty:
+        return resultado
+
+    # tentativa 3: qualquer atleta válido de mercado
+    df_final = df[~df["status_id"].isin([5, 6, 7])].copy()
+    return montar_time(df_final)
