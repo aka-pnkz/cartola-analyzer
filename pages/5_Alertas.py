@@ -60,11 +60,15 @@ colunas = [
     "clube",
     "posicao",
     "status",
+    "status_anterior",
+    "rodada_referencia",
+    "mudou_nesta_consulta",
+    "contexto_status",
+    "detectado_em",
+    "desde_quando_esta_assim",
     "preco",
     "media",
     "score_pct",
-    "evento_em",
-    "criado_em",
 ]
 colunas = [c for c in colunas if c in alertas_filtrados.columns]
 
@@ -73,12 +77,12 @@ st.dataframe(
     use_container_width=True,
     hide_index=True,
     column_config={
-        "evento_em": st.column_config.DatetimeColumn(
-            "Evento em",
+        "detectado_em": st.column_config.DatetimeColumn(
+            "Detectado em",
             format="DD/MM/YYYY HH:mm",
         ),
-        "criado_em": st.column_config.DatetimeColumn(
-            "Criado em",
+        "desde_quando_esta_assim": st.column_config.DatetimeColumn(
+            "Desde quando",
             format="DD/MM/YYYY HH:mm",
         ),
     },
