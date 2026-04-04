@@ -3,12 +3,7 @@ Cálculo do Score Anti-Mitada (SAM) para atletas do Cartola FC.
 """
 import pandas as pd
 import numpy as np
-from utils.api import (
-    get_atletas_mercado,
-    POSICAO_MAP,
-    STATUS_MAP,
-    get_clubes_mapa_curto,
-)
+from utils.api import get_atletas_mercado, POSICAO_MAP, STATUS_MAP, get_clubes_mapa_curto
 
 W_MEDIA = 0.30
 W_CONSISTENCIA = 0.20
@@ -97,10 +92,6 @@ def build_atletas_df() -> pd.DataFrame:
 
 
 def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "4-3-3") -> pd.DataFrame:
-    """
-    Monta uma escalação válida com 11 jogadores + 1 técnico,
-    respeitando formação e orçamento.
-    """
     formacoes = {
         "4-3-3": {"Goleiro": 1, "Lateral": 2, "Zagueiro": 2, "Meia": 3, "Atacante": 3, "Técnico": 1},
         "4-4-2": {"Goleiro": 1, "Lateral": 2, "Zagueiro": 2, "Meia": 4, "Atacante": 2, "Técnico": 1},
@@ -110,18 +101,17 @@ def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "
 
     slots = formacoes.get(formacao, formacoes["4-3-3"])
     df_sorted = df.sort_values(["sam", "media"], ascending=[False, False]).copy()
-
-    # manter apenas prováveis para a escalação
     df_sorted = df_sorted[df_sorted["status_id"] == 2].copy()
+
     if df_sorted.empty:
         return pd.DataFrame()
 
-    # função para calcular o custo mínimo restante da escalação
     def custo_minimo_restante(df_base, faltantes, ids_ignorados):
         total = 0.0
         for pos, qtd in faltantes.items():
             if qtd <= 0:
                 continue
+
             pool = df_base[
                 (df_base["posicao"] == pos) &
                 (~df_base["id"].isin(ids_ignorados))
@@ -136,9 +126,7 @@ def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "
     selecionados = []
     ids_sel = set()
     gasto = 0.0
-
     ordem_posicoes = ["Goleiro", "Lateral", "Zagueiro", "Meia", "Atacante", "Técnico"]
-
     faltantes = slots.copy()
 
     for posicao in ordem_posicoes:
@@ -158,10 +146,8 @@ def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "
                 break
 
             preco_atual = float(row["preco"])
-
             faltantes_teste = faltantes.copy()
             faltantes_teste[posicao] -= 1
-
             ids_teste = ids_sel | {row["id"]}
             custo_restante = custo_minimo_restante(df_sorted, faltantes_teste, ids_teste)
 
@@ -186,14 +172,16 @@ def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "
     if len(result[result["posicao"] != "Técnico"]) != 11 or len(result[result["posicao"] == "Técnico"]) != 1:
         return pd.DataFrame()
 
+    ordem = {
+        "Goleiro": 1,
+        "Lateral": 2,
+        "Zagueiro": 3,
+        "Meia": 4,
+        "Atacante": 5,
+        "Técnico": 6,
+    }
+
     return result.sort_values(
         by=["posicao"],
-        key=lambda s: s.map({
-            "Goleiro": 1,
-            "Lateral": 2,
-            "Zagueiro": 3,
-            "Meia": 4,
-            "Atacante": 5,
-            "Técnico": 6,
-        })
+        key=lambda s: s.map(ordem)
     ).reset_index(drop=True)
