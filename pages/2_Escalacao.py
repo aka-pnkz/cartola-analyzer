@@ -1,5 +1,10 @@
 import streamlit as st
-from utils.score_mitada import build_atletas_df, recomendados_por_faixa, diagnostico_escalacao
+from utils.score_mitada import (
+    build_atletas_df,
+    recomendados_por_faixa,
+    diagnostico_escalacao,
+    resumo_posicoes_debug,
+)
 
 st.set_page_config(page_title="Escalação | Cartola Analyzer", page_icon="📋", layout="wide")
 st.title("📋 Escalação Inteligente")
@@ -24,6 +29,7 @@ with st.sidebar:
 
     formacao = st.selectbox("🔢 Formação", ["4-3-3", "4-4-2", "3-5-2", "3-4-3"])
     mostrar_diag = st.toggle("Mostrar diagnóstico", value=True)
+    mostrar_debug = st.toggle("Mostrar debug de posições", value=True)
 
 escalacao = recomendados_por_faixa(df, orcamento, formacao)
 
@@ -49,9 +55,14 @@ if escalacao.empty:
             })
 
         st.dataframe(rows, use_container_width=True, hide_index=True)
+
+    if mostrar_debug:
+        st.subheader("🧪 Debug de posições retornadas pela API")
+        debug_df = resumo_posicoes_debug(df)
+        st.dataframe(debug_df, use_container_width=True, hide_index=True)
         st.info(
-            "Se faltarem atletas em alguma posição ou se o custo mínimo por posição "
-            "já ultrapassar o orçamento, a escalação não conseguirá fechar."
+            "Se Goleiro e Técnico não aparecerem aqui, o problema está no mapeamento "
+            "ou no payload recebido da API, não na lógica de escalação."
         )
 
 else:
