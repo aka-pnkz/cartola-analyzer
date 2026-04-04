@@ -1,73 +1,90 @@
-"""
-Comparação lado a lado de atletas do Cartola FC.
-Gera radar chart e tabela de métricas comparativas.
-"""
 import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
-from typing import Optional
 
 
-METRICAS = ["media", "preco", "custo_beneficio", "variacao", "jogos", "sam_pct"]
-LABELS   = ["Média", "Preço", "Custo-Benefício", "Variação", "Jogos", "SAM (%)"]
+RADAR_METRICAS = [
+    ("ataque_norm", "Ataque"),
+    ("defesa_norm", "Defesa"),
+    ("base_norm", "Base"),
+    ("consistencia_norm", "Consistência"),
+    ("custo_beneficio_norm", "Custo-benefício"),
+    ("disciplina_norm", "Disciplina"),
+]
 
 
-def comparar_atletas(df: pd.DataFrame, ids: list[int]) -> pd.DataFrame:
-    """Filtra os atletas selecionados e retorna subconjunto com métricas."""
-    return df[df["id"].isin(ids)].copy()
+def preparar_comparacao(df: pd.DataFrame, atletas_ids: list[int]) -> pd.DataFrame:
+    if df.empty or not atletas_ids:
+        return pd.DataFrame()
+
+    comp = df[df["id"].isin(atletas_ids)].copy()
+    if comp.empty:
+        return comp
+
+    comp = comp.sort_values(["score", "media"], ascending=[False, False]).reset_index(drop=True)
+    return comp
 
 
-def radar_chart(df_comp: pd.DataFrame) -> go.Figure:
-    """Gera radar chart comparativo entre atletas."""
-    metricas_disp = [m for m in METRICAS if m in df_comp.columns]
-    labels_disp = [LABELS[METRICAS.index(m)] for m in metricas_disp]
+def gerar_radar_comparativo(df_comp: pd.DataFrame):
+    if df_comp.empty:
+        return go.Figure()
 
-    df_norm = df_comp[metricas_disp].copy()
-    for col in metricas_disp:
-        mn, mx = df_norm[col].min(), df_norm[col].max()
-        if mx > mn:
-            df_norm[col] = (df_norm[col] - mn) / (mx - mn)
-        else:
-            df_norm[col] = 0.5
-
-    colors = [
-        "#01696f", "#d19900", "#a12c7b", "#da7101",
-        "#006494", "#437a22", "#7a39bb", "#a13544",
-    ]
-
+    categorias = [m[1] for m in RADAR_METRICAS]
     fig = go.Figure()
-    for i, (_, row) in enumerate(df_comp.iterrows()):
-        vals = df_norm.loc[row.name, metricas_disp].tolist()
-        vals += [vals[0]]
-        cat = labels_disp + [labels_disp[0]]
+
+    for _, row in df_comp.iterrows():
+        valores = [float(row.get(m[0], 0) or 0) for m in RADAR_METRICAS]
+        valores.append(valores[0])
+        thetas = categorias + [categorias[0]]
+
         fig.add_trace(go.Scatterpolar(
-            r=vals,
-            theta=cat,
+            r=valores,
+            theta=thetas,
             fill="toself",
-            name=row["nome"],
-            line_color=colors[i % len(colors)],
-            opacity=0.7,
+            name=f"{row['nome']} ({row['clube']})",
         ))
 
     fig.update_layout(
         polar=dict(
-            radialaxis=dict(visible=True, range=[0, 1], showticklabels=False),
+            radialaxis=dict(
+                visible=True,
+                range=[0, 1],
+            )
         ),
         showlegend=True,
-        title="Comparativo de Atletas — Radar",
-        margin=dict(t=60, b=20, l=20, r=20),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(family="Inter, sans-serif"),
+        margin=dict(l=30, r=30, t=30, b=30),
     )
+
     return fig
 
 
 def tabela_comparativa(df_comp: pd.DataFrame) -> pd.DataFrame:
-    """Retorna tabela formatada para exibição."""
-    cols = ["nome", "clube", "posicao", "status", "preco", "media",
-            "variacao", "jogos", "custo_beneficio", "sam_pct"]
-    cols_disp = [c for c in cols if c in df_comp.columns]
-    tb = df_comp[cols_disp].copy()
-    tb.columns = [c.replace("_", " ").title() for c in cols_disp]
-    return tb
+    if df_comp.empty:
+        return pd.DataFrame()
+
+    colunas = [
+        "nome", "clube", "posicao", "status", "preco", "media", "score_pct",
+        "ataque_bruto", "defesa_bruto", "base_bruto", "disciplina_bruto"
+    ]
+    colunas = [c for c in colunas if c in df_comp.columns]
+
+    return df_comp[colunas].copy()
+
+
+def resumo_vencedores(df_comp: pd.DataFrame) -> dict:
+    if df_comp.empty:
+        return {}
+
+    resumo = {}
+
+    for coluna, rotulo in [
+        ("score_pct", "Melhor score"),
+        ("media", "Melhor média"),
+        ("ataque_bruto", "Melhor ataque"),
+        ("defesa_bruto", "Melhor defesa"),
+        ("base_bruto", "Melhor base"),
+    ]:
+        if coluna in df_comp.columns:
+            idx = df_comp[coluna].astype(float).idxmax()
+            resumo[rotulo] = df_comp.loc[idx, "nome"]
+
+    return resumo
