@@ -1,5 +1,6 @@
 import streamlit as st
-from utils.score_mitada import build_atletas_df, recomendados_por_faixa
+from utils.score_mitada import build_atletas_df, calcular_sam, recomendados_por_faixa
+df = calcular_sam(build_atletas_df())
 
 st.set_page_config(page_title="Escalação | Cartola Analyzer", page_icon="📋", layout="wide")
 st.title("📋 Escalação Inteligente")
