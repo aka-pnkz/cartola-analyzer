@@ -68,7 +68,7 @@ STATUS_MAP = {
     3: "⚠️ Dúvida",
     5: "❌ Suspenso",
     6: "🤕 Lesionado",
-    7: "🚫 Nulo",
+    7: "🟡 Disponível",
 }
 
 STATUS_MERCADO_NOME = {
