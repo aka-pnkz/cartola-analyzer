@@ -1,7 +1,7 @@
 """
 Cálculo do Score Anti-Mitada (SAM) para atletas do Cartola FC.
 Versão revisada com depuração de posições, diagnóstico de escalação
-e fallback mais flexível para montagem do time.
+e regra de elegibilidade mais tolerante para status.
 """
 
 import pandas as pd
@@ -56,6 +56,31 @@ def _resolver_posicao(atleta: dict) -> tuple[int, str]:
             return pos_id, nome
 
     return pos_id, POSICAO_MAP.get(pos_id, f"Posição {pos_id}")
+
+
+def _elegivel_para_escalar(row: pd.Series) -> bool:
+    status_id = row.get("status_id")
+    preco = float(row.get("preco", 0) or 0)
+
+    if preco <= 0:
+        return False
+
+    # suspenso e lesionado continuam fora
+    if status_id in [5, 6]:
+        return False
+
+    # demais status continuam elegíveis
+    return True
+
+
+def _prioridade_status(status_id):
+    mapa = {
+        2: 0,  # provável
+        3: 1,  # dúvida
+        7: 2,  # nulo / outro caso menos confiável
+        None: 3,
+    }
+    return mapa.get(status_id, 3)
 
 
 def calcular_sam(df: pd.DataFrame) -> pd.DataFrame:
@@ -136,6 +161,7 @@ def build_atletas_df() -> pd.DataFrame:
 
     df = df[df["preco"] > 0].copy()
     df["custo_beneficio"] = (df["media"] / df["preco"].replace(0, np.nan)).fillna(0)
+    df["elegivel"] = df.apply(_elegivel_para_escalar, axis=1)
 
     return calcular_sam(df)
 
@@ -148,6 +174,7 @@ def resumo_posicoes_debug(df: pd.DataFrame) -> pd.DataFrame:
         df.groupby(["posicao_id", "posicao"])
         .agg(
             qtd=("id", "count"),
+            elegiveis=("elegivel", "sum"),
             menor_preco=("preco", "min"),
             maior_preco=("preco", "max"),
         )
@@ -167,7 +194,7 @@ def diagnostico_escalacao(df: pd.DataFrame, orcamento: float, formacao: str = "4
     for pos, qtd in slots.items():
         pool = df[df["posicao"] == pos].copy()
         prov = pool[pool["status_id"] == 2].copy()
-        aceit = pool[pool["preco"] > 0].copy()
+        aceit = pool[pool["elegivel"] == True].copy()
 
         diag["posicoes"][pos] = {
             "necessarios": int(qtd),
@@ -184,25 +211,20 @@ def _montar_guloso_com_reserva(
     df_base: pd.DataFrame,
     orcamento: float,
     slots: dict,
-    status_prioridade: bool = True,
 ) -> pd.DataFrame:
     df_ref = df_base.copy()
+    if df_ref.empty:
+        return pd.DataFrame()
 
-    if status_prioridade and "status_id" in df_ref.columns:
-        prioridade = df_ref["status_id"].map({
-            2: 0,
-            3: 1,
-            7: 2,
-            5: 3,
-            6: 4,
-        }).fillna(5)
+    df_ref = df_ref[df_ref["elegivel"] == True].copy()
+    if df_ref.empty:
+        return pd.DataFrame()
 
-        df_ref = (
-            df_ref.assign(_prioridade_status=prioridade)
-            .sort_values(["_prioridade_status", "sam", "media"], ascending=[True, False, False])
-        )
-    else:
-        df_ref = df_ref.sort_values(["sam", "media"], ascending=[False, False])
+    df_ref["_prioridade_status"] = df_ref["status_id"].apply(_prioridade_status)
+    df_ref = df_ref.sort_values(
+        ["_prioridade_status", "sam", "media"],
+        ascending=[True, False, False]
+    )
 
     def custo_minimo_restante(faltantes: dict, ids_ignorados: set) -> float | None:
         total = 0.0
@@ -213,8 +235,7 @@ def _montar_guloso_com_reserva(
 
             pool = df_ref[
                 (df_ref["posicao"] == pos) &
-                (~df_ref["id"].isin(ids_ignorados)) &
-                (df_ref["preco"] > 0)
+                (~df_ref["id"].isin(ids_ignorados))
             ].sort_values("preco", ascending=True)
 
             if len(pool) < qtd:
@@ -236,8 +257,7 @@ def _montar_guloso_com_reserva(
 
         candidatos = df_ref[
             (df_ref["posicao"] == posicao) &
-            (~df_ref["id"].isin(ids_sel)) &
-            (df_ref["preco"] > 0)
+            (~df_ref["id"].isin(ids_sel))
         ]
 
         escolhidos = 0
@@ -290,20 +310,16 @@ def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "
 
     slots = FORMACOES.get(formacao, FORMACOES["4-3-3"])
 
-    tentativas = [
-        df[df["status_id"] == 2].copy(),
-        df[df["status_id"].isin([2, 3, 7])].copy(),
-        df[df["preco"] > 0].copy(),
-    ]
+    # tentativa 1: só prováveis
+    tentativa_1 = df[(df["status_id"] == 2) & (df["elegivel"] == True)].copy()
+    result = _montar_guloso_com_reserva(tentativa_1, orcamento, slots)
+    if not result.empty:
+        return result
 
-    for tentativa in tentativas:
-        result = _montar_guloso_com_reserva(
-            tentativa,
-            orcamento,
-            slots,
-            status_prioridade=True,
-        )
-        if not result.empty:
-            return result
+    # tentativa 2: elegíveis em geral
+    tentativa_2 = df[df["elegivel"] == True].copy()
+    result = _montar_guloso_com_reserva(tentativa_2, orcamento, slots)
+    if not result.empty:
+        return result
 
     return pd.DataFrame()
