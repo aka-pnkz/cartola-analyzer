@@ -4,17 +4,19 @@ import plotly.express as px
 from utils.api import get_partidas
 
 
-def _normalizar_serie(series: pd.Series) -> pd.Series:
-    if series is None or series.empty:
-        return pd.Series(dtype=float)
+def _serie_segura(df: pd.DataFrame, coluna: str, default=0.0) -> pd.Series:
+    if coluna in df.columns:
+        return pd.to_numeric(df[coluna], errors="coerce").fillna(default)
+    return pd.Series([default] * len(df), index=df.index)
 
-    mn = series.min()
-    mx = series.max()
 
-    if pd.isna(mn) or pd.isna(mx) or mn == mx:
-        return pd.Series([0.5] * len(series), index=series.index)
-
-    return (series - mn) / (mx - mn)
+def _texto_seguro(valor, fallback="-"):
+    if valor is None:
+        return fallback
+    if isinstance(valor, float) and pd.isna(valor):
+        return fallback
+    texto = str(valor).strip()
+    return texto if texto else fallback
 
 
 def montar_forca_por_clube(df_atletas: pd.DataFrame) -> pd.DataFrame:
@@ -22,6 +24,24 @@ def montar_forca_por_clube(df_atletas: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     base = df_atletas.copy()
+
+    for col in [
+        "score", "media", "ataque_bruto", "defesa_bruto",
+        "base_bruto", "preco", "elegivel", "id"
+    ]:
+        if col not in base.columns:
+            if col in ["elegivel"]:
+                base[col] = False
+            elif col in ["id"]:
+                base[col] = range(1, len(base) + 1)
+            else:
+                base[col] = 0.0
+
+    if "clube_id" not in base.columns:
+        base["clube_id"] = range(1, len(base) + 1)
+
+    if "clube" not in base.columns:
+        base["clube"] = "Clube"
 
     agg = (
         base.groupby(["clube_id", "clube"], as_index=False)
@@ -59,6 +79,20 @@ def montar_forca_por_clube(df_atletas: pd.DataFrame) -> pd.DataFrame:
     return agg
 
 
+def _classificar_alerta_confronto(row) -> str:
+    diff_ataque = abs(float(row.get("indice_ataque_casa", 0)) - float(row.get("indice_ataque_fora", 0)))
+    maior_sg = max(float(row.get("indice_sg_casa", 0)), float(row.get("indice_sg_fora", 0)))
+    maior_ataque = max(float(row.get("indice_ataque_casa", 0)), float(row.get("indice_ataque_fora", 0)))
+
+    if maior_sg >= 1.8:
+        return "🛡️ Bom para SG"
+    if diff_ataque <= 0.15:
+        return "⚖️ Jogo equilibrado"
+    if maior_ataque >= 1.8:
+        return "🔥 Bom para ataque"
+    return "📊 Confronto neutro"
+
+
 def montar_tabela_confrontos(df_atletas: pd.DataFrame) -> pd.DataFrame:
     if df_atletas is None or df_atletas.empty:
         return pd.DataFrame()
@@ -76,7 +110,6 @@ def montar_tabela_confrontos(df_atletas: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     mapa = clubes_forca.set_index("clube_id").to_dict("index")
-
     rows = []
 
     for p in partidas_lista:
@@ -112,19 +145,19 @@ def montar_tabela_confrontos(df_atletas: pd.DataFrame) -> pd.DataFrame:
         )
 
         rows.append({
-            "rodada": p.get("partida_data"),
+            "partida_data": p.get("partida_data"),
             "clube_casa_id": clube_casa_id,
             "clube_visitante_id": clube_visitante_id,
-            "casa": casa["clube"],
-            "fora": fora["clube"],
-            "indice_ataque_casa": round(aproveitamento_casa, 3),
-            "indice_ataque_fora": round(aproveitamento_fora, 3),
-            "indice_sg_casa": round(sg_casa, 3),
-            "indice_sg_fora": round(sg_fora, 3),
-            "forca_ofensiva_casa": round(casa["forca_ofensiva"], 3),
-            "forca_ofensiva_fora": round(fora["forca_ofensiva"], 3),
-            "forca_defensiva_casa": round(casa["forca_defensiva"], 3),
-            "forca_defensiva_fora": round(fora["forca_defensiva"], 3),
+            "casa": _texto_seguro(casa.get("clube")),
+            "fora": _texto_seguro(fora.get("clube")),
+            "indice_ataque_casa": round(float(aproveitamento_casa), 3),
+            "indice_ataque_fora": round(float(aproveitamento_fora), 3),
+            "indice_sg_casa": round(float(sg_casa), 3),
+            "indice_sg_fora": round(float(sg_fora), 3),
+            "forca_ofensiva_casa": round(float(casa.get("forca_ofensiva", 0)), 3),
+            "forca_ofensiva_fora": round(float(fora.get("forca_ofensiva", 0)), 3),
+            "forca_defensiva_casa": round(float(casa.get("forca_defensiva", 0)), 3),
+            "forca_defensiva_fora": round(float(fora.get("forca_defensiva", 0)), 3),
         })
 
     tabela = pd.DataFrame(rows)
@@ -139,28 +172,13 @@ def montar_tabela_confrontos(df_atletas: pd.DataFrame) -> pd.DataFrame:
         lambda x: x["casa"] if x["indice_sg_casa"] >= x["indice_sg_fora"] else x["fora"],
         axis=1,
     )
-
     tabela["jogo"] = tabela["casa"] + " x " + tabela["fora"]
-
     tabela["alerta"] = tabela.apply(_classificar_alerta_confronto, axis=1)
 
     return tabela.sort_values(
         ["indice_ataque_casa", "indice_ataque_fora"],
         ascending=[False, False]
     ).reset_index(drop=True)
-
-
-def _classificar_alerta_confronto(row) -> str:
-    diff_ataque = abs(float(row["indice_ataque_casa"]) - float(row["indice_ataque_fora"]))
-    maior_sg = max(float(row["indice_sg_casa"]), float(row["indice_sg_fora"]))
-
-    if maior_sg >= 1.8:
-        return "🛡️ Bom para SG"
-    if diff_ataque <= 0.15:
-        return "⚖️ Jogo equilibrado"
-    if max(float(row["indice_ataque_casa"]), float(row["indice_ataque_fora"])) >= 1.8:
-        return "🔥 Bom para ataque"
-    return "📊 Confronto neutro"
 
 
 def melhores_confrontos(df_confrontos: pd.DataFrame) -> dict:
@@ -174,10 +192,10 @@ def melhores_confrontos(df_confrontos: pd.DataFrame) -> dict:
     row_sg = df_confrontos.loc[melhor_sg_idx]
 
     return {
-        "melhor_ataque_jogo": row_ataque["jogo"],
-        "melhor_time_ataque": row_ataque["favorito_ataque"],
-        "melhor_sg_jogo": row_sg["jogo"],
-        "melhor_time_sg": row_sg["favorito_sg"],
+        "melhor_ataque_jogo": row_ataque.get("jogo", "-"),
+        "melhor_time_ataque": row_ataque.get("favorito_ataque", "-"),
+        "melhor_sg_jogo": row_sg.get("jogo", "-"),
+        "melhor_time_sg": row_sg.get("favorito_sg", "-"),
     }
 
 
@@ -236,22 +254,29 @@ def grafico_indices_confronto(df_confrontos: pd.DataFrame):
 
 
 def sugerir_atletas_por_confronto(df_atletas: pd.DataFrame, confronto_row: pd.Series) -> pd.DataFrame:
-    if df_atletas is None or df_atletas.empty or confronto_row is None or confronto_row.empty:
+    if df_atletas is None or df_atletas.empty or confronto_row is None or len(confronto_row) == 0:
         return pd.DataFrame()
 
-    casa = confronto_row["casa"]
-    fora = confronto_row["fora"]
+    casa = confronto_row.get("casa")
+    fora = confronto_row.get("fora")
 
     atletas = df_atletas[df_atletas["clube"].isin([casa, fora])].copy()
     if atletas.empty:
         return pd.DataFrame()
 
+    if "score" not in atletas.columns:
+        atletas["score"] = 0.0
+    if "ataque_norm" not in atletas.columns:
+        atletas["ataque_norm"] = 0.0
+    if "defesa_norm" not in atletas.columns:
+        atletas["defesa_norm"] = 0.0
+
     atletas["fit_confronto"] = atletas["score"]
 
-    atletas.loc[atletas["clube"] == confronto_row["favorito_ataque"], "fit_confronto"] += (
+    atletas.loc[atletas["clube"] == confronto_row.get("favorito_ataque"), "fit_confronto"] += (
         atletas["ataque_norm"] * 0.20
     )
-    atletas.loc[atletas["clube"] == confronto_row["favorito_sg"], "fit_confronto"] += (
+    atletas.loc[atletas["clube"] == confronto_row.get("favorito_sg"), "fit_confronto"] += (
         atletas["defesa_norm"] * 0.15
     )
 
@@ -276,3 +301,24 @@ def sugerir_atletas_por_confronto(df_atletas: pd.DataFrame, confronto_row: pd.Se
     colunas = [c for c in colunas if c in atletas.columns]
 
     return atletas[colunas].head(12).reset_index(drop=True)
+
+
+# Wrappers de compatibilidade
+def get_tabela_confrontos(df_atletas: pd.DataFrame) -> pd.DataFrame:
+    return montar_tabela_confrontos(df_atletas)
+
+
+def analisar_confrontos(df_atletas: pd.DataFrame) -> pd.DataFrame:
+    return montar_tabela_confrontos(df_atletas)
+
+
+def get_melhores_confrontos(df_confrontos: pd.DataFrame) -> dict:
+    return melhores_confrontos(df_confrontos)
+
+
+def get_grafico_confrontos(df_confrontos: pd.DataFrame):
+    return grafico_indices_confronto(df_confrontos)
+
+
+def get_sugestoes_confronto(df_atletas: pd.DataFrame, confronto_row: pd.Series) -> pd.DataFrame:
+    return sugerir_atletas_por_confronto(df_atletas, confronto_row)
