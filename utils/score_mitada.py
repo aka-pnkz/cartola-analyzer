@@ -1,12 +1,3 @@
-"""
-Score tático para atletas do Cartola FC.
-Versão com:
-- cálculo do score por perfil
-- fatores derivados de scouts
-- elegibilidade por status
-- escalação por base barata + upgrades
-"""
-
 import pandas as pd
 import numpy as np
 
@@ -86,7 +77,7 @@ PERFIS = {
 
 def _minmax(series: pd.Series) -> pd.Series:
     mn, mx = series.min(), series.max()
-    if mx == mn:
+    if pd.isna(mn) or pd.isna(mx) or mx == mn:
         return pd.Series(0.5, index=series.index)
     return (series - mn) / (mx - mn)
 
@@ -141,8 +132,8 @@ def _normalizar_por_posicao(df: pd.DataFrame, coluna_ou_serie) -> pd.Series:
 
 
 def calcular_metricas_taticas(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        return df
+    if df is None or df.empty:
+        return pd.DataFrame()
 
     df = df.copy()
 
@@ -198,13 +189,12 @@ def calcular_metricas_taticas(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def calcular_score_perfil(df: pd.DataFrame, perfil: str = "Equilibrado") -> pd.DataFrame:
-    if df.empty:
-        return df
+    if df is None or df.empty:
+        return pd.DataFrame()
 
     df = calcular_metricas_taticas(df)
     pesos = PERFIS.get(perfil, PERFIS["Equilibrado"])
 
-    df = df.copy()
     df["score"] = (
         pesos["ataque"] * df["ataque_norm"] +
         pesos["defesa"] * df["defesa_norm"] +
@@ -282,7 +272,7 @@ def build_atletas_df(perfil: str = "Equilibrado") -> pd.DataFrame:
 
 
 def resumo_posicoes_debug(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
+    if df is None or df.empty:
         return pd.DataFrame()
 
     return (
@@ -418,7 +408,7 @@ def _aplicar_upgrades(base: pd.DataFrame, universo: pd.DataFrame, orcamento: flo
 
 
 def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "4-3-3") -> pd.DataFrame:
-    if df.empty:
+    if df is None or df.empty:
         return pd.DataFrame()
 
     slots = FORMACOES.get(formacao, FORMACOES["4-3-3"])
@@ -457,7 +447,7 @@ def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "
 
 
 def top_por_perfil(df: pd.DataFrame, posicao: str = None, n: int = 10) -> pd.DataFrame:
-    if df.empty:
+    if df is None or df.empty:
         return pd.DataFrame()
 
     base = df[df["elegivel"] == True].copy()
