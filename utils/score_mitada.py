@@ -1,7 +1,10 @@
 """
 Cálculo do Score Anti-Mitada (SAM) para atletas do Cartola FC.
-Versão revisada com depuração de posições, diagnóstico de escalação
-e regra de elegibilidade mais tolerante para status.
+Versão revisada com:
+- cálculo do SAM
+- depuração de posições
+- elegibilidade por status
+- escalação por base barata + upgrades
 """
 
 import pandas as pd
@@ -65,19 +68,17 @@ def _elegivel_para_escalar(row: pd.Series) -> bool:
     if preco <= 0:
         return False
 
-    # suspenso e lesionado continuam fora
     if status_id in [5, 6]:
         return False
 
-    # demais status continuam elegíveis
     return True
 
 
 def _prioridade_status(status_id):
     mapa = {
-        2: 0,  # provável
-        3: 1,  # dúvida
-        7: 2,  # nulo / outro caso menos confiável
+        2: 0,
+        3: 1,
+        7: 2,
         None: 3,
     }
     return mapa.get(status_id, 3)
@@ -107,7 +108,6 @@ def calcular_sam(df: pd.DataFrame) -> pd.DataFrame:
     df["sam_pct"] = (df["sam"] * 100).round(1)
     df = df.sort_values(["sam", "media"], ascending=[False, False]).reset_index(drop=True)
     df["ranking"] = df.index + 1
-
     return df
 
 
@@ -207,101 +207,94 @@ def diagnostico_escalacao(df: pd.DataFrame, orcamento: float, formacao: str = "4
     return diag
 
 
-def _montar_guloso_com_reserva(
-    df_base: pd.DataFrame,
-    orcamento: float,
-    slots: dict,
-) -> pd.DataFrame:
-    df_ref = df_base.copy()
-    if df_ref.empty:
-        return pd.DataFrame()
-
-    df_ref = df_ref[df_ref["elegivel"] == True].copy()
-    if df_ref.empty:
-        return pd.DataFrame()
-
-    df_ref["_prioridade_status"] = df_ref["status_id"].apply(_prioridade_status)
-    df_ref = df_ref.sort_values(
-        ["_prioridade_status", "sam", "media"],
-        ascending=[True, False, False]
-    )
-
-    def custo_minimo_restante(faltantes: dict, ids_ignorados: set) -> float | None:
-        total = 0.0
-
-        for pos, qtd in faltantes.items():
-            if qtd <= 0:
-                continue
-
-            pool = df_ref[
-                (df_ref["posicao"] == pos) &
-                (~df_ref["id"].isin(ids_ignorados))
-            ].sort_values("preco", ascending=True)
-
-            if len(pool) < qtd:
-                return None
-
-            total += float(pool.head(qtd)["preco"].sum())
-
-        return total
-
-    selecionados = []
+def _montar_base_mais_barata(df: pd.DataFrame, slots: dict) -> pd.DataFrame:
+    escolhidos = []
     ids_sel = set()
-    gasto = 0.0
-    faltantes = slots.copy()
 
     for posicao in ORDEM_POS:
         qtd = slots.get(posicao, 0)
         if qtd <= 0:
             continue
 
-        candidatos = df_ref[
-            (df_ref["posicao"] == posicao) &
-            (~df_ref["id"].isin(ids_sel))
-        ]
+        pool = df[
+            (df["posicao"] == posicao) &
+            (df["elegivel"] == True) &
+            (~df["id"].isin(ids_sel))
+        ].sort_values(["preco", "sam"], ascending=[True, False])
 
-        escolhidos = 0
-
-        for _, row in candidatos.iterrows():
-            if escolhidos >= qtd:
-                break
-
-            faltantes_teste = faltantes.copy()
-            faltantes_teste[posicao] -= 1
-            ids_teste = ids_sel | {row["id"]}
-            restante = custo_minimo_restante(faltantes_teste, ids_teste)
-
-            if restante is None:
-                continue
-
-            preco = float(row["preco"])
-
-            if gasto + preco + restante <= float(orcamento):
-                selecionados.append(row.to_dict())
-                ids_sel.add(row["id"])
-                gasto += preco
-                escolhidos += 1
-                faltantes[posicao] -= 1
-
-        if escolhidos < qtd:
+        if len(pool) < qtd:
             return pd.DataFrame()
 
-    result = pd.DataFrame(selecionados)
-    if result.empty:
-        return result
+        escolha = pool.head(qtd).copy()
+        escolhidos.append(escolha)
+        ids_sel.update(escolha["id"].tolist())
 
-    result["gasto_acumulado"] = result["preco"].cumsum()
-
-    jogadores = len(result[result["posicao"] != "Técnico"])
-    tecnicos = len(result[result["posicao"] == "Técnico"])
-
-    if jogadores != 11 or tecnicos != 1:
+    if not escolhidos:
         return pd.DataFrame()
 
-    return result.sort_values(
-        by=["posicao"],
-        key=lambda s: s.map(ORDEM_MAP)
-    ).reset_index(drop=True)
+    return pd.concat(escolhidos, ignore_index=True)
+
+
+def _aplicar_upgrades(base: pd.DataFrame, universo: pd.DataFrame, orcamento: float) -> pd.DataFrame:
+    time = base.copy()
+    gasto_atual = float(time["preco"].sum())
+
+    if gasto_atual > float(orcamento):
+        return pd.DataFrame()
+
+    saldo = float(orcamento) - gasto_atual
+
+    while True:
+        melhor_delta_sam = 0
+        melhor_troca = None
+
+        for idx, atual in time.iterrows():
+            pos = atual["posicao"]
+            atuais_ids = set(time["id"].tolist())
+
+            candidatos = universo[
+                (universo["posicao"] == pos) &
+                (universo["elegivel"] == True) &
+                (~universo["id"].isin(atuais_ids - {atual["id"]}))
+            ].copy()
+
+            if candidatos.empty:
+                continue
+
+            candidatos["delta_preco"] = candidatos["preco"] - atual["preco"]
+            candidatos["delta_sam"] = candidatos["sam"] - atual["sam"]
+
+            candidatos = candidatos[
+                (candidatos["delta_preco"] <= saldo) &
+                (candidatos["delta_sam"] > 0)
+            ].copy()
+
+            if candidatos.empty:
+                continue
+
+            candidatos["eficiencia_upgrade"] = candidatos["delta_sam"] / candidatos["delta_preco"].replace(0, 0.0001)
+            melhor_candidato = candidatos.sort_values(
+                ["delta_sam", "eficiencia_upgrade", "sam"],
+                ascending=[False, False, False]
+            ).iloc[0]
+
+            if float(melhor_candidato["delta_sam"]) > melhor_delta_sam:
+                melhor_delta_sam = float(melhor_candidato["delta_sam"])
+                melhor_troca = (idx, melhor_candidato)
+
+        if melhor_troca is None:
+            break
+
+        idx, novo = melhor_troca
+        antigo_preco = float(time.loc[idx, "preco"])
+        novo_preco = float(novo["preco"])
+        saldo -= (novo_preco - antigo_preco)
+
+        for col in time.columns:
+            if col in novo.index:
+                time.loc[idx, col] = novo[col]
+
+    return time
 
 
 def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "4-3-3") -> pd.DataFrame:
@@ -309,17 +302,36 @@ def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "
         return pd.DataFrame()
 
     slots = FORMACOES.get(formacao, FORMACOES["4-3-3"])
+    universo = df.copy()
 
-    # tentativa 1: só prováveis
-    tentativa_1 = df[(df["status_id"] == 2) & (df["elegivel"] == True)].copy()
-    result = _montar_guloso_com_reserva(tentativa_1, orcamento, slots)
-    if not result.empty:
-        return result
+    universo["_prioridade_status"] = universo["status_id"].apply(_prioridade_status)
+    universo = universo.sort_values(
+        ["_prioridade_status", "sam", "media"],
+        ascending=[True, False, False]
+    )
 
-    # tentativa 2: elegíveis em geral
-    tentativa_2 = df[df["elegivel"] == True].copy()
-    result = _montar_guloso_com_reserva(tentativa_2, orcamento, slots)
-    if not result.empty:
-        return result
+    base = _montar_base_mais_barata(universo, slots)
+    if base.empty:
+        return pd.DataFrame()
 
-    return pd.DataFrame()
+    if float(base["preco"].sum()) > float(orcamento):
+        return pd.DataFrame()
+
+    time_final = _aplicar_upgrades(base, universo, orcamento)
+    if time_final.empty:
+        return pd.DataFrame()
+
+    jogadores = len(time_final[time_final["posicao"] != "Técnico"])
+    tecnicos = len(time_final[time_final["posicao"] == "Técnico"])
+
+    if jogadores != 11 or tecnicos != 1:
+        return pd.DataFrame()
+
+    time_final = time_final.sort_values(
+        by=["posicao"],
+        key=lambda s: s.map(ORDEM_MAP)
+    ).reset_index(drop=True)
+
+    time_final["gasto_acumulado"] = time_final["preco"].cumsum()
+
+    return time_final
