@@ -97,43 +97,86 @@ def build_atletas_df() -> pd.DataFrame:
 
 
 def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "4-3-3") -> pd.DataFrame:
+    """
+    Monta uma escalação válida com 11 jogadores + 1 técnico,
+    respeitando formação e orçamento.
+    """
     formacoes = {
-        "4-3-3": {"Goleiro": 1, "Lateral": 2, "Zagueiro": 2, "Meia": 3, "Atacante": 3},
-        "4-4-2": {"Goleiro": 1, "Lateral": 2, "Zagueiro": 2, "Meia": 4, "Atacante": 2},
-        "3-5-2": {"Goleiro": 1, "Lateral": 1, "Zagueiro": 2, "Meia": 5, "Atacante": 2},
-        "3-4-3": {"Goleiro": 1, "Lateral": 1, "Zagueiro": 2, "Meia": 4, "Atacante": 3},
+        "4-3-3": {"Goleiro": 1, "Lateral": 2, "Zagueiro": 2, "Meia": 3, "Atacante": 3, "Técnico": 1},
+        "4-4-2": {"Goleiro": 1, "Lateral": 2, "Zagueiro": 2, "Meia": 4, "Atacante": 2, "Técnico": 1},
+        "3-5-2": {"Goleiro": 1, "Lateral": 0, "Zagueiro": 3, "Meia": 5, "Atacante": 2, "Técnico": 1},
+        "3-4-3": {"Goleiro": 1, "Lateral": 0, "Zagueiro": 3, "Meia": 4, "Atacante": 3, "Técnico": 1},
     }
 
     slots = formacoes.get(formacao, formacoes["4-3-3"])
-    selecionados = []
-    gasto = 0.0
-    df_sorted = df.sort_values("sam", ascending=False)
+    df_sorted = df.sort_values(["sam", "media"], ascending=[False, False]).copy()
 
-    for posicao, qtd in slots.items():
+    # manter apenas prováveis para a escalação
+    df_sorted = df_sorted[df_sorted["status_id"] == 2].copy()
+    if df_sorted.empty:
+        return pd.DataFrame()
+
+    # função para calcular o custo mínimo restante da escalação
+    def custo_minimo_restante(df_base, faltantes, ids_ignorados):
+        total = 0.0
+        for pos, qtd in faltantes.items():
+            if qtd <= 0:
+                continue
+            pool = df_base[
+                (df_base["posicao"] == pos) &
+                (~df_base["id"].isin(ids_ignorados))
+            ].sort_values("preco", ascending=True)
+
+            if len(pool) < qtd:
+                return None
+
+            total += pool.head(qtd)["preco"].sum()
+        return float(total)
+
+    selecionados = []
+    ids_sel = set()
+    gasto = 0.0
+
+    ordem_posicoes = ["Goleiro", "Lateral", "Zagueiro", "Meia", "Atacante", "Técnico"]
+
+    faltantes = slots.copy()
+
+    for posicao in ordem_posicoes:
+        qtd = slots.get(posicao, 0)
+        if qtd == 0:
+            continue
+
         candidatos = df_sorted[
             (df_sorted["posicao"] == posicao) &
-            (df_sorted["status_id"] == 2) &
-            (~df_sorted["id"].isin([a["id"] for a in selecionados]))
-        ].head(qtd * 10)
+            (~df_sorted["id"].isin(ids_sel))
+        ].copy()
+
+        escolhidos_pos = 0
 
         for _, row in candidatos.iterrows():
-            if len([a for a in selecionados if a["posicao"] == posicao]) >= qtd:
+            if escolhidos_pos >= qtd:
                 break
-            if gasto + row["preco"] <= orcamento:
+
+            preco_atual = float(row["preco"])
+
+            faltantes_teste = faltantes.copy()
+            faltantes_teste[posicao] -= 1
+
+            ids_teste = ids_sel | {row["id"]}
+            custo_restante = custo_minimo_restante(df_sorted, faltantes_teste, ids_teste)
+
+            if custo_restante is None:
+                continue
+
+            if gasto + preco_atual + custo_restante <= orcamento:
                 selecionados.append(row.to_dict())
-                gasto += row["preco"]
+                ids_sel.add(row["id"])
+                gasto += preco_atual
+                escolhidos_pos += 1
+                faltantes[posicao] -= 1
 
-    tecnicos = df_sorted[
-        (df_sorted["posicao"] == "Técnico") &
-        (df_sorted["status_id"] == 2) &
-        (~df_sorted["id"].isin([a["id"] for a in selecionados]))
-    ].head(10)
-
-    for _, row in tecnicos.iterrows():
-        if gasto + row["preco"] <= orcamento:
-            selecionados.append(row.to_dict())
-            gasto += row["preco"]
-            break
+        if escolhidos_pos < qtd:
+            return pd.DataFrame()
 
     result = pd.DataFrame(selecionados)
 
@@ -143,4 +186,14 @@ def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "
     if len(result[result["posicao"] != "Técnico"]) != 11 or len(result[result["posicao"] == "Técnico"]) != 1:
         return pd.DataFrame()
 
-    return result
+    return result.sort_values(
+        by=["posicao"],
+        key=lambda s: s.map({
+            "Goleiro": 1,
+            "Lateral": 2,
+            "Zagueiro": 3,
+            "Meia": 4,
+            "Atacante": 5,
+            "Técnico": 6,
+        })
+    ).reset_index(drop=True)
