@@ -6,10 +6,16 @@ from utils.score_mitada import (
     resumo_posicoes_debug,
 )
 
-st.set_page_config(page_title="Escalação | Cartola Analyzer", page_icon="📋", layout="wide")
+st.set_page_config(
+    page_title="Escalação | Cartola Analyzer",
+    page_icon="📋",
+    layout="wide",
+)
+
 st.title("📋 Escalação Inteligente")
 
 df = build_atletas_df()
+
 if df.empty:
     st.error("Sem dados disponíveis.")
     st.stop()
@@ -27,7 +33,11 @@ with st.sidebar:
     )
     orcamento = round(orcamento, 2)
 
-    formacao = st.selectbox("🔢 Formação", ["4-3-3", "4-4-2", "3-5-2", "3-4-3"])
+    formacao = st.selectbox(
+        "🔢 Formação",
+        ["4-3-3", "4-4-2", "3-5-2", "3-4-3"],
+    )
+
     mostrar_diag = st.toggle("Mostrar diagnóstico", value=True)
     mostrar_debug = st.toggle("Mostrar debug de posições", value=True)
 
@@ -54,28 +64,90 @@ if escalacao.empty:
                 "Mais barato aceitável": info["mais_barato_aceitavel"],
             })
 
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+        st.dataframe(
+            rows,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        st.info(
+            "Se os atletas aparecem no debug, mas não entram no diagnóstico como aceitáveis, "
+            "o problema está na regra de elegibilidade por status."
+        )
 
     if mostrar_debug:
         st.subheader("🧪 Debug de posições retornadas pela API")
         debug_df = resumo_posicoes_debug(df)
-        st.dataframe(debug_df, use_container_width=True, hide_index=True)
+
+        st.dataframe(
+            debug_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+
         st.info(
-            "Se Goleiro e Técnico aparecem aqui, mas não entram na escalação, "
-            "o bloqueio está na lógica de seleção e não no retorno da API."
+            "Esse quadro mostra quantos atletas vieram da API por posição, "
+            "quantos estão elegíveis, e a faixa de preços disponível."
         )
 
 else:
     qtd_jogadores = len(escalacao[escalacao["posicao"] != "Técnico"])
     qtd_tecnicos = len(escalacao[escalacao["posicao"] == "Técnico"])
+    gasto_total = float(escalacao["preco"].sum())
+    media_total = float(escalacao["media"].sum())
+    media_time = media_total / len(escalacao[escalacao["posicao"] != "Técnico"]) if qtd_jogadores else 0
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("💸 Gasto total", f"C$ {escalacao['preco'].sum():.2f}")
-    col2.metric("📈 Média somada", f"{escalacao['media'].sum():.1f}")
-    col3.metric("👥 Escalação", f"{qtd_jogadores} jogadores + {qtd_tecnicos} técnico")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("💸 Gasto total", f"C$ {gasto_total:.2f}")
+    col2.metric("📈 Média somada", f"{media_total:.1f}")
+    col3.metric("📊 Média por atleta", f"{media_time:.2f}")
+    col4.metric("👥 Escalação", f"{qtd_jogadores} jogadores + {qtd_tecnicos} técnico")
+
+    st.subheader("✅ Time sugerido")
 
     st.dataframe(
-        escalacao[["nome", "clube", "posicao", "status", "preco", "media", "sam_pct"]],
+        escalacao[
+            [
+                "nome",
+                "clube",
+                "posicao",
+                "status",
+                "preco",
+                "media",
+                "sam_pct",
+            ]
+        ],
         use_container_width=True,
         hide_index=True,
     )
+
+    if mostrar_diag:
+        st.subheader("🩺 Diagnóstico da escalação")
+        diag = diagnostico_escalacao(df, orcamento, formacao)
+
+        rows = []
+        for pos, info in diag["posicoes"].items():
+            rows.append({
+                "Posição": pos,
+                "Necessários": info["necessarios"],
+                "Prováveis": info["provaveis"],
+                "Aceitáveis": info["aceitaveis"],
+                "Mais barato provável": info["mais_barato_provavel"],
+                "Mais barato aceitável": info["mais_barato_aceitavel"],
+            })
+
+        st.dataframe(
+            rows,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    if mostrar_debug:
+        st.subheader("🧪 Debug de posições retornadas pela API")
+        debug_df = resumo_posicoes_debug(df)
+
+        st.dataframe(
+            debug_df,
+            use_container_width=True,
+            hide_index=True,
+        )
