@@ -1,16 +1,42 @@
 """
 Cálculo do Score Anti-Mitada (SAM) para atletas do Cartola FC.
-Versão revisada com depuração de posições.
+Versão revisada com depuração de posições, diagnóstico de escalação
+e fallback mais flexível para montagem do time.
 """
+
 import pandas as pd
 import numpy as np
-from utils.api import get_atletas_mercado, POSICAO_MAP, STATUS_MAP, get_clubes_mapa_curto
+
+from utils.api import (
+    get_atletas_mercado,
+    POSICAO_MAP,
+    STATUS_MAP,
+    get_clubes_mapa_curto,
+)
 
 W_MEDIA = 0.30
 W_CONSISTENCIA = 0.20
 W_CUSTO = 0.20
 W_CASA_FORA = 0.15
 W_TENDENCIA = 0.15
+
+FORMACOES = {
+    "4-3-3": {"Goleiro": 1, "Lateral": 2, "Zagueiro": 2, "Meia": 3, "Atacante": 3, "Técnico": 1},
+    "4-4-2": {"Goleiro": 1, "Lateral": 2, "Zagueiro": 2, "Meia": 4, "Atacante": 2, "Técnico": 1},
+    "3-5-2": {"Goleiro": 1, "Lateral": 0, "Zagueiro": 3, "Meia": 5, "Atacante": 2, "Técnico": 1},
+    "3-4-3": {"Goleiro": 1, "Lateral": 0, "Zagueiro": 3, "Meia": 4, "Atacante": 3, "Técnico": 1},
+}
+
+ORDEM_POS = ["Goleiro", "Lateral", "Zagueiro", "Meia", "Atacante", "Técnico"]
+
+ORDEM_MAP = {
+    "Goleiro": 1,
+    "Lateral": 2,
+    "Zagueiro": 3,
+    "Meia": 4,
+    "Atacante": 5,
+    "Técnico": 6,
+}
 
 
 def _minmax(series: pd.Series) -> pd.Series:
@@ -56,6 +82,7 @@ def calcular_sam(df: pd.DataFrame) -> pd.DataFrame:
     df["sam_pct"] = (df["sam"] * 100).round(1)
     df = df.sort_values(["sam", "media"], ascending=[False, False]).reset_index(drop=True)
     df["ranking"] = df.index + 1
+
     return df
 
 
@@ -129,25 +156,18 @@ def resumo_posicoes_debug(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-FORMACOES = {
-    "4-3-3": {"Goleiro": 1, "Lateral": 2, "Zagueiro": 2, "Meia": 3, "Atacante": 3, "Técnico": 1},
-    "4-4-2": {"Goleiro": 1, "Lateral": 2, "Zagueiro": 2, "Meia": 4, "Atacante": 2, "Técnico": 1},
-    "3-5-2": {"Goleiro": 1, "Lateral": 0, "Zagueiro": 3, "Meia": 5, "Atacante": 2, "Técnico": 1},
-    "3-4-3": {"Goleiro": 1, "Lateral": 0, "Zagueiro": 3, "Meia": 4, "Atacante": 3, "Técnico": 1},
-}
-
-ORDEM_POS = ["Goleiro", "Lateral", "Zagueiro", "Meia", "Atacante", "Técnico"]
-ORDEM_MAP = {"Goleiro": 1, "Lateral": 2, "Zagueiro": 3, "Meia": 4, "Atacante": 5, "Técnico": 6}
-
-
 def diagnostico_escalacao(df: pd.DataFrame, orcamento: float, formacao: str = "4-3-3") -> dict:
     slots = FORMACOES.get(formacao, FORMACOES["4-3-3"])
-    diag = {"orcamento": float(orcamento), "formacao": formacao, "posicoes": {}}
+    diag = {
+        "orcamento": float(orcamento),
+        "formacao": formacao,
+        "posicoes": {},
+    }
 
     for pos, qtd in slots.items():
         pool = df[df["posicao"] == pos].copy()
         prov = pool[pool["status_id"] == 2].copy()
-        aceit = pool[~pool["status_id"].isin([5, 6, 7])].copy()
+        aceit = pool[pool["preco"] > 0].copy()
 
         diag["posicoes"][pos] = {
             "necessarios": int(qtd),
@@ -160,19 +180,31 @@ def diagnostico_escalacao(df: pd.DataFrame, orcamento: float, formacao: str = "4
     return diag
 
 
-def _montar_guloso_com_reserva(df_base: pd.DataFrame, orcamento: float, slots: dict, status_prioridade: bool = True) -> pd.DataFrame:
+def _montar_guloso_com_reserva(
+    df_base: pd.DataFrame,
+    orcamento: float,
+    slots: dict,
+    status_prioridade: bool = True,
+) -> pd.DataFrame:
     df_ref = df_base.copy()
 
-    if status_prioridade:
-        prioridade = df_ref["status_id"].map({2: 0, 3: 1}).fillna(2)
-        df_ref = df_ref.assign(_prioridade_status=prioridade).sort_values(
-            ["_prioridade_status", "sam", "media"],
-            ascending=[True, False, False]
+    if status_prioridade and "status_id" in df_ref.columns:
+        prioridade = df_ref["status_id"].map({
+            2: 0,
+            3: 1,
+            7: 2,
+            5: 3,
+            6: 4,
+        }).fillna(5)
+
+        df_ref = (
+            df_ref.assign(_prioridade_status=prioridade)
+            .sort_values(["_prioridade_status", "sam", "media"], ascending=[True, False, False])
         )
     else:
         df_ref = df_ref.sort_values(["sam", "media"], ascending=[False, False])
 
-    def custo_minimo_restante(faltantes, ids_ignorados):
+    def custo_minimo_restante(faltantes: dict, ids_ignorados: set) -> float | None:
         total = 0.0
 
         for pos, qtd in faltantes.items():
@@ -181,7 +213,8 @@ def _montar_guloso_com_reserva(df_base: pd.DataFrame, orcamento: float, slots: d
 
             pool = df_ref[
                 (df_ref["posicao"] == pos) &
-                (~df_ref["id"].isin(ids_ignorados))
+                (~df_ref["id"].isin(ids_ignorados)) &
+                (df_ref["preco"] > 0)
             ].sort_values("preco", ascending=True)
 
             if len(pool) < qtd:
@@ -203,7 +236,8 @@ def _montar_guloso_com_reserva(df_base: pd.DataFrame, orcamento: float, slots: d
 
         candidatos = df_ref[
             (df_ref["posicao"] == posicao) &
-            (~df_ref["id"].isin(ids_sel))
+            (~df_ref["id"].isin(ids_sel)) &
+            (df_ref["preco"] > 0)
         ]
 
         escolhidos = 0
@@ -244,7 +278,10 @@ def _montar_guloso_com_reserva(df_base: pd.DataFrame, orcamento: float, slots: d
     if jogadores != 11 or tecnicos != 1:
         return pd.DataFrame()
 
-    return result.sort_values(by=["posicao"], key=lambda s: s.map(ORDEM_MAP)).reset_index(drop=True)
+    return result.sort_values(
+        by=["posicao"],
+        key=lambda s: s.map(ORDEM_MAP)
+    ).reset_index(drop=True)
 
 
 def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "4-3-3") -> pd.DataFrame:
@@ -255,12 +292,17 @@ def recomendados_por_faixa(df: pd.DataFrame, orcamento: float, formacao: str = "
 
     tentativas = [
         df[df["status_id"] == 2].copy(),
-        df[df["status_id"].isin([2, 3])].copy(),
-        df[~df["status_id"].isin([5, 6, 7])].copy(),
+        df[df["status_id"].isin([2, 3, 7])].copy(),
+        df[df["preco"] > 0].copy(),
     ]
 
     for tentativa in tentativas:
-        result = _montar_guloso_com_reserva(tentativa, orcamento, slots, status_prioridade=True)
+        result = _montar_guloso_com_reserva(
+            tentativa,
+            orcamento,
+            slots,
+            status_prioridade=True,
+        )
         if not result.empty:
             return result
 
