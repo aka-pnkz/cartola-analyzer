@@ -1,7 +1,6 @@
 import pandas as pd
 import plotly.graph_objects as go
 
-
 RADAR_METRICAS = [
     ("ataque_norm", "Ataque"),
     ("defesa_norm", "Defesa"),
@@ -13,19 +12,18 @@ RADAR_METRICAS = [
 
 
 def preparar_comparacao(df: pd.DataFrame, atletas_ids: list[int]) -> pd.DataFrame:
-    if df.empty or not atletas_ids:
+    if df is None or df.empty or not atletas_ids:
         return pd.DataFrame()
 
     comp = df[df["id"].isin(atletas_ids)].copy()
     if comp.empty:
         return comp
 
-    comp = comp.sort_values(["score", "media"], ascending=[False, False]).reset_index(drop=True)
-    return comp
+    return comp.sort_values(["score", "media"], ascending=[False, False]).reset_index(drop=True)
 
 
 def gerar_radar_comparativo(df_comp: pd.DataFrame):
-    if df_comp.empty:
+    if df_comp is None or df_comp.empty:
         return go.Figure()
 
     categorias = [m[1] for m in RADAR_METRICAS]
@@ -58,7 +56,7 @@ def gerar_radar_comparativo(df_comp: pd.DataFrame):
 
 
 def tabela_comparativa(df_comp: pd.DataFrame) -> pd.DataFrame:
-    if df_comp.empty:
+    if df_comp is None or df_comp.empty:
         return pd.DataFrame()
 
     colunas = [
@@ -71,7 +69,7 @@ def tabela_comparativa(df_comp: pd.DataFrame) -> pd.DataFrame:
 
 
 def resumo_vencedores(df_comp: pd.DataFrame) -> dict:
-    if df_comp.empty:
+    if df_comp is None or df_comp.empty:
         return {}
 
     resumo = {}
